@@ -1,14 +1,7 @@
 ---
 name: Release Assets
 
-# What: Builds, attests and uploads the release binaries and their SBOM.
-# Fires on: called by release-please.yml after a release is created.
-# Needs: nothing. The tag must belong to a published release whose target is the tagged commit, which is how release-please creates them.
-# Safe to delete if: the project publishes no binaries. It also no-ops on its own without go.mod; remove the caller in release-please.yml if deleted.
-#
-# Called by release-please.yml once a release exists. It is not triggered by
-# `release: published`, because a release created with GITHUB_TOKEN does not
-# fire workflow events - that is why the previous version never ran.
+# Not `release: published`: a release created with GITHUB_TOKEN fires no workflow events.
 
 on:
   workflow_call:
@@ -32,16 +25,10 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
-      # Build provenance is signed with a short-lived OIDC identity, so there
-      # is no key to store or rotate.
       id-token: write
       attestations: write
     steps:
-      # The tag is the only input that decides what ships, so it is resolved
-      # to a commit here and the checkout uses that commit. A tag moved after
-      # the release was created cannot change what is built, and a dispatch
-      # with a typo, an unknown tag or a draft release fails here instead of
-      # publishing. Annotated tags are dereferenced to the commit they point at.
+      # Checkout uses the commit resolved here, so moving the tag after release cannot change what ships.
       - name: Resolve and validate the release tag
         id: release
         env:
@@ -54,10 +41,8 @@ jobs:
             echo "::error::tag_name must match vX.Y.Z, got '${TAG_NAME}'"
             exit 1
           fi
-          # Each call is captured and checked rather than read from a process
-          # substitution: errexit ignores what a process substitution exits
-          # with, and gh prints its error body on stdout, so a 404 otherwise
-          # lands in the variables and is reported as a target mismatch.
+          # Captured and checked, not process-substituted: errexit ignores those, and gh prints
+          # error bodies on stdout, so a 404 would be reported as a target mismatch.
           if ! ref=$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG_NAME}" --jq '"\(.object.type) \(.object.sha)"'); then
             echo "::error::${TAG_NAME} is not a tag in ${GH_REPO}"
             exit 1
@@ -85,10 +70,7 @@ jobs:
           ref: ${{ steps.release.outputs.sha }}
           persist-credentials: false
 
-
-      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
-      # resolves against GITHUB_WORKSPACE, which does not exist when a
-      # job-level condition is evaluated, so that guard always fails open.
+      # Not a job-level hashFiles() guard: GITHUB_WORKSPACE does not exist yet there, so it fails open.
       - id: detect
         run: |
           if [ -f go.mod ]; then
@@ -101,14 +83,11 @@ jobs:
       - uses: ./.github/actions/setup
         if: steps.detect.outputs.go == 'true'
 
-      # Build commands live in Taskfile.yml so they can be run locally.
       - name: Build release assets
         if: steps.detect.outputs.go == 'true'
         run: task release-assets
 
-      # An SBOM of the built artifacts, not of the checkout. Binaries are
-      # what people download, and a repository-level inventory does not
-      # describe them.
+      # Of the built binaries, not the checkout: binaries are what people download.
       - name: Generate SBOM
         if: steps.detect.outputs.go == 'true'
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
@@ -132,8 +111,7 @@ jobs:
             dist/healthprobe*
             dist/sbom.spdx.json
 
-      # gh ships on the runner, so this needs no third-party action in a job
-      # that holds contents: write.
+      # gh, not a third-party action, in a job that holds contents: write.
       - name: Upload release assets
         if: steps.detect.outputs.go == 'true'
         env:

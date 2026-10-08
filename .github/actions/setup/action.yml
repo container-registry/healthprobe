@@ -2,10 +2,6 @@
 name: Setup
 description: Install Task at the pinned version, and optionally the Go toolchain
 
-# Task is the single entry point for build and test commands, so CI runs the
-# same thing a contributor runs locally. Keep new commands in Taskfile.yml
-# rather than inlining them into a workflow step.
-
 inputs:
   go:
     description: Install the Go toolchain from go.mod
@@ -26,7 +22,6 @@ runs:
       run: |  # zizmor: ignore[github-env] Adds only this action's checksum-verified install directory to PATH.
         set -euo pipefail
 
-        # versions.env is the single source of truth for the pin.
         version="$(grep '^TASK_VERSION=' versions.env | cut -d= -f2)"
         version="${version#v}"
         if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -51,9 +46,7 @@ runs:
         tool_dir="${RUNNER_TEMP:-${PWD}/.tools}/task"
         mkdir -p "${tool_dir}/bin"
 
-        # The expected digest is committed in versions.env, not fetched from the
-        # release: a checksum file downloaded from the same release only proves
-        # the release is internally consistent.
+        # Not fetched from the release: that would only prove the release is self-consistent.
         var="TASK_SHA256_$(echo "${os}_${arch}" | tr '[:lower:]' '[:upper:]')"
         expected="$(grep "^${var}=" versions.env | cut -d= -f2)"
         if [ -z "${expected}" ]; then

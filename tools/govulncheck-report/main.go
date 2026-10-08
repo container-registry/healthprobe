@@ -1,13 +1,3 @@
-// Command govulncheck-report turns a `govulncheck -format json` stream into a
-// markdown report and a machine-readable summary.
-//
-// It is a CI helper, but it is deliberately usable on its own:
-//
-//	govulncheck -format json ./... > govulncheck.json
-//	go run ./tools/govulncheck-report -json govulncheck.json
-//
-// Finding vulnerabilities is not an error; only a scanner that failed to
-// produce a usable report is, which is what -fail-on-scanner-error gates on.
 package main
 
 import (
@@ -99,9 +89,7 @@ func githubOutputs(summary Summary) string {
 		summary.ScannerError, summary.FindingCount, summary.FixableFindingCount, summary.CalledFindingCount)
 }
 
-// readExitCode reads the exit code govulncheck was recorded with. An empty path
-// means "not captured", which is treated as a clean exit; a path that was given
-// but cannot be read is an error, so a broken capture never looks like success.
+// A given but unreadable path is an error so a broken capture never looks like success.
 func readExitCode(path string) (int, error) {
 	if path == "" {
 		return 0, nil

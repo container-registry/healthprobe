@@ -1,16 +1,8 @@
 ---
 name: Welcome
 
-# What: Greets a first-time issue or pull request author.
-# Fires on: first issue or first pull request from an author.
-# Needs: nothing.
-# Safe to delete if: the project does not want an automated greeting.
-#
-# DO NOT ADD actions/checkout TO THIS WORKFLOW.
-# pull_request_target runs in the base repository's context with a writable
-# token. Checking out the pull request head here executes a fork's code with
-# that token, which is remote code execution against this repository.
-# The trigger is required because a fork pull request must still be greeted.
+# DO NOT ADD actions/checkout: pull_request_target holds a writable token, and checking
+# out the PR head runs fork code with it. repo-lint enforces this.
 on:  # zizmor: ignore[dangerous-triggers]
   issues:
     types: [opened]

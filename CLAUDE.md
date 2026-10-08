@@ -28,7 +28,7 @@ Never inline a build or test command into a workflow. Add it to `Taskfile.yml` a
 - **Every GitHub Action must be pinned to a full 40-character SHA with a `# vX.Y.Z` comment.** A gate in
   `hygiene.yml` fails the build otherwise.
 - **A `pull_request_target` workflow must never check out the pull request.** `repo-lint` fails the build if one
-  does. Three workflows use that trigger and say why in their headers.
+  does. The workflows on that trigger carry a warning comment.
 - **`.github/settings.yml` is applied to the live repository** on push to main. Treat it as production.
 - **Never require a path-filtered workflow as a status check.** It does not report on a pull request that misses
   its filter and the check waits forever. Require the aggregate `required-checks` context.

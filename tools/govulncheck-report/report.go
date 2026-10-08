@@ -8,15 +8,14 @@ import (
 	"strings"
 )
 
-// Reachability levels, ordered from least to most actionable. govulncheck
-// emits one finding per level for the same vulnerability, so the levels are
-// merged per (vulnerability, module) pair and only the deepest one is kept.
+// Ordered by actionability: govulncheck emits one finding per level and
+// analyze keeps only the deepest per (vulnerability, module).
 type reachability int
 
 const (
-	reachRequired reachability = iota // the module is in the build, nothing more
-	reachImported                     // a vulnerable package is imported
-	reachCalled                       // a vulnerable symbol is reachable from this code
+	reachRequired reachability = iota
+	reachImported
+	reachCalled
 )
 
 func (r reachability) String() string {
@@ -30,7 +29,6 @@ func (r reachability) String() string {
 	}
 }
 
-// Finding is one deduplicated (vulnerability, module) pair.
 type Finding struct {
 	ID           string `json:"id"`
 	Module       string `json:"module"`
@@ -43,8 +41,6 @@ type Finding struct {
 	level reachability
 }
 
-// Summary is the machine-readable side of a render, written next to the
-// markdown so later workflow steps can branch on it without re-parsing.
 type Summary struct {
 	ScannerError        bool      `json:"scannerError"`
 	ExitCode            int       `json:"exitCode"`
@@ -57,9 +53,6 @@ type Summary struct {
 	Findings            []Finding `json:"findings"`
 }
 
-// govulncheck -format json emits a stream of concatenated JSON objects, each
-// carrying exactly one of these keys. Unknown keys (SBOM, progress) decode
-// into the zero value and are ignored.
 type message struct {
 	Config  *configMessage `json:"config"`
 	OSV     *osvEntry      `json:"osv"`
@@ -97,9 +90,6 @@ type frame struct {
 	Receiver string `json:"receiver"`
 }
 
-// analyze turns a govulncheck JSON stream plus the process exit code into a
-// Summary. It never returns an error: an unreadable report is a scanner error,
-// which is reported through the Summary so the caller can still render it.
 func analyze(report io.Reader, exitCode int) Summary {
 	var (
 		parseErrors []string
@@ -166,7 +156,6 @@ func analyze(report io.Reader, exitCode int) Summary {
 	for _, f := range merged {
 		out = append(out, *f)
 	}
-	// Most actionable first: reachable code, then vulnerability ID.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].level != out[j].level {
 			return out[i].level > out[j].level
@@ -197,11 +186,8 @@ func analyze(report io.Reader, exitCode int) Summary {
 		}
 	}
 
-	// A scan that produced no config message produced no usable report at all
-	// (empty or truncated output). With -format json govulncheck reports
-	// vulnerabilities through the stream and still exits 0, so a non-zero exit
-	// means the scanner itself failed; exit 3 is reserved for "vulnerabilities
-	// found" and is only trusted when findings actually came through.
+	// No config message means empty or truncated output. -format json exits 0 even
+	// with findings, so only exit 3 (older releases) backed by findings is not a failure.
 	summary.ScannerError = len(parseErrors) > 0 ||
 		!sawConfig ||
 		(exitCode != 0 && exitCode != 3) ||
@@ -210,10 +196,8 @@ func analyze(report io.Reader, exitCode int) Summary {
 	return summary
 }
 
-// describe picks the module the vulnerability lives in. trace[0] is the
-// vulnerable frame itself (govulncheck sorts traces from the vulnerable symbol
-// outwards to the entry point), so it carries the affected module and the
-// version actually in the build.
+// trace[0] is the vulnerable frame: govulncheck orders traces from the vulnerable
+// symbol out to the entry point.
 func describe(raw rawFinding, osv osvEntry) (module, version string, level reachability, trace string) {
 	if len(raw.Trace) == 0 {
 		return fallbackModule(osv), "", reachRequired, ""

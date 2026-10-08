@@ -6,10 +6,8 @@ import (
 	"testing"
 )
 
-// The testdata fixtures are reduced from real `govulncheck -format json` runs:
-// findings.json comes from a module pinned to golang.org/x/text v0.3.0 built
-// with Go 1.26.4, clean.json from this repository. OSV fields the renderer does
-// not read were stripped to keep the fixtures reviewable.
+// Fixtures are real govulncheck runs (findings.json: golang.org/x/text v0.3.0 on
+// Go 1.26.4) with OSV fields the renderer ignores stripped.
 
 func analyzeFixture(t *testing.T, name string, exitCode int) Summary {
 	t.Helper()
@@ -27,8 +25,7 @@ func TestAnalyzeFindings(t *testing.T) {
 	if summary.ScannerError {
 		t.Fatalf("findings must not be reported as a scanner error: %+v", summary.ParseErrors)
 	}
-	// The fixture holds 18 raw findings; govulncheck emits one per detail level,
-	// so module/package/symbol findings collapse into 14 (vulnerability, module) pairs.
+	// 18 raw findings, one per detail level, collapse into 14 (vulnerability, module) pairs.
 	if summary.FindingCount != 14 {
 		t.Errorf("FindingCount = %d, want 14", summary.FindingCount)
 	}
@@ -63,8 +60,6 @@ func TestAnalyzeCleanReport(t *testing.T) {
 	if summary.FindingCount != 0 {
 		t.Errorf("FindingCount = %d, want 0", summary.FindingCount)
 	}
-	// govulncheck streams every candidate OSV entry even when nothing matches,
-	// so an empty finding list is the only signal of a clean scan.
 	if len(summary.Findings) != 0 {
 		t.Errorf("Findings = %+v, want none", summary.Findings)
 	}
@@ -91,8 +86,7 @@ func TestAnalyzeScannerErrors(t *testing.T) {
 }
 
 func TestAnalyzeVulnerabilitiesFoundExitCode(t *testing.T) {
-	// Older govulncheck releases exit 3 once vulnerabilities are found; that is
-	// a result, not a scanner failure.
+	// Older govulncheck releases exit 3 when vulnerabilities are found.
 	if summary := analyzeFixture(t, "findings.json", 3); summary.ScannerError {
 		t.Error("exit code 3 with findings must not be a scanner error")
 	}
@@ -189,7 +183,6 @@ func TestReadExitCode(t *testing.T) {
 	if code, err := readExitCode(path); err != nil || code != 3 {
 		t.Errorf("readExitCode(file) = %d, %v", code, err)
 	}
-	// A capture that was requested but is unreadable must not look like success.
 	if _, err := readExitCode(path + ".missing"); err == nil {
 		t.Error("missing exit-code file must be an error")
 	}

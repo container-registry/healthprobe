@@ -1,25 +1,12 @@
 ---
 name: PR Preview Image
 
-# What: Builds, pushes and signs a preview image for a pull request, tagged pr-<N>, and comments the reference on it.
-# Fires on: pull requests against main whose cumulative diff touches an image input; in a native GitHub stack, only the top pull request.
-# Needs: no secrets. Previews go to the public `8gcr-dev` project on 8gears.container-registry.com, pushed by the federated Harbor robot `robot_gh-healthprobe-preview` with the job's GitHub OIDC token. REGISTRY_ADDRESS and PR_REGISTRY_PROJECT repository variables override the target. Fork and Dependabot pull requests get no OIDC token, so they build no preview.
-# Safe to delete if: the project publishes no container image, or reviewers do not need one before merge.
-#
-# Self-contained on purpose: publish-image.yml only accepts a published
-# vX.Y.Z release tag, and a preview must not weaken that check.
-#
-# The image-input allowlist lives in the `changes` job, not in the trigger's
-# `paths` filter. GitHub evaluates `paths` against a pull request's own diff,
-# which for a stacked pull request is only its top slice, so a docs-only top
-# would never build the stack image. The job diffs against the stack base
-# instead. A side effect is that this workflow always reports a status, so it
-# is safe to require, unlike a path-filtered one.
+# Not reusing publish-image.yml: it accepts only a release tag, and a preview must not weaken that.
+# No `paths` filter: it sees only a stack's top slice, so the `changes` job diffs the whole stack.
 
 on:
   pull_request:
-    # `stacked`: GitHub opens the PRs of a stack before it links them, so
-    # `opened` never carries `pull_request.stack`; the link fires `stacked`.
+    # `opened` precedes stack linking and never carries pull_request.stack; linking fires `stacked`.
     types: [opened, synchronize, reopened, stacked]
     branches: [main]
 
@@ -32,10 +19,7 @@ concurrency:
 jobs:
   changes:
     name: Check image inputs
-    # A fork's GITHUB_TOKEN cannot push to the package, and dependabot runs
-    # get a read-only token. In a native GitHub stack only the top pull
-    # request builds: its head already contains every lower one, so each
-    # lower image would be a prefix of it.
+    # Only the top of a native stack builds: its head already contains every lower PR.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]' &&
@@ -63,9 +47,7 @@ jobs:
           STACK_BASE_SHA: ${{ github.event.pull_request.stack.base.sha || '' }}
           STACK_NUMBER: ${{ github.event.pull_request.stack.number || '' }}
           EVENT_ACTION: ${{ github.event.action }}
-          # Only inputs the Dockerfile consumes: the root package it builds,
-          # the packages it can import, the module files and the pins. Extend
-          # when the image copies more than that.
+          # Only what the Dockerfile consumes; extend when the image copies more.
           IMAGE_INPUTS: |
             ^[^/]+\.go$
             ^cmd/
@@ -84,14 +66,10 @@ jobs:
             exit 0
           fi
           base="${STACK_BASE_SHA:-${PR_BASE_SHA}}"
-          # --no-renames: a rename out of the allowlist would otherwise show
-          # only its new path and hide that an image input went away
+          # --no-renames: otherwise a rename out of the allowlist hides that an image input went away.
           changed="$(git diff --name-only --no-renames "${base}...${HEAD_SHA}")"
           if matched="$(grep -Ef <(printf '%s' "${IMAGE_INPUTS}") <<<"${changed}")"; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-            # Named in the pull request comment, so a pull request that
-            # changes no image input itself can see why its stack still
-            # produces one.
             {
               echo "matched<<MATCHED_EOF"
               printf '%s\n' "${matched}"
@@ -120,8 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # The head, not the merge commit, so the digest matches what the
-          # comment says was built and a rebase of main cannot change it.
+          # The head, not the merge commit, so a moving main cannot change the commented digest.
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
@@ -190,9 +167,7 @@ jobs:
   pr-comment:
     name: Comment preview image ref
     needs: [changes, preview-image]
-    # Also runs when nothing was published: a build that is skipped, fails, or
-    # belongs to a PR that is not the top of its stack leaves an earlier
-    # reference standing, and the comment has to say that it is stale.
+    # Runs when nothing was published too, so an earlier reference gets marked stale.
     if: >-
       always() &&
       github.event.pull_request.head.repo.full_name == github.repository &&
@@ -256,24 +231,19 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body });
             };
 
-            // The notice is delimited rather than pattern-matched, so a second
-            // one replaces the first instead of stacking under it.
             const withoutNotice = body => {
               const kept = [];
               let inNotice = false;
               for (const line of body.split('\n')) {
                 if (line === staleStart) { inNotice = true; continue; }
                 if (line === staleEnd) { inNotice = false; continue; }
-                // `:stale` also matches the inline marker the first
-                // implementation used, so an old notice is not kept forever.
+                // `:stale` also matches the first implementation's inline marker.
                 if (!inNotice && line !== marker && !/^<!--[^>]*:stale/.test(line)) kept.push(line);
               }
               return kept.join('\n').trim();
             };
 
             if (process.env.BUILD_RESULT !== 'success') {
-              // Nothing was published, so there is nothing to correct unless an
-              // earlier revision left a reference behind.
               if (!existing) return;
               let reason;
               if (process.env.CHANGES_RESULT === 'skipped' && stackNumber) {
@@ -281,14 +251,10 @@ jobs:
                 reason = `this PR is not the top of stack #${stackNumber}` +
                   (top ? `, so the stack's preview image is published on #${top.number}` : '');
               } else if (process.env.CHANGES_RESULT !== 'success') {
-                // A failed or cancelled input check publishes nothing either,
-                // and must not be reported as "no input changed".
                 reason = `the image input check for \`${short}\` did not complete (${process.env.CHANGES_RESULT})`;
               } else if (process.env.CHANGES_BUILD !== 'true') {
                 reason = `no image input changed between the base and \`${short}\``;
               } else {
-                // The publish step repoints the mutable reference before it
-                // signs, so a build that got that far has already replaced it.
                 reason = `the preview image build for \`${short}\` did not succeed (${process.env.BUILD_RESULT}). ` +
                   'That build may already have repointed the preview reference, so trust the digest below rather than the tag';
               }

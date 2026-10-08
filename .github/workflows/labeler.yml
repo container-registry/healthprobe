@@ -1,23 +1,12 @@
 ---
 name: PR Labeler
 
-# What: Labels pull requests by which paths they touch.
-# Fires on: pull request opened, synchronized or reopened.
-# Needs: nothing.
-# Safe to delete if: path labels are not wanted. Delete .github/labeler.yml with it.
-#
-# DO NOT ADD actions/checkout TO THIS WORKFLOW.
-# pull_request_target runs in the base repository's context with a writable
-# token. Checking out the pull request head here executes a fork's code with
-# that token, which is remote code execution against this repository.
-# The trigger is required because a fork pull request must still be labelled.
+# DO NOT ADD actions/checkout: pull_request_target holds a writable token, and checking
+# out the PR head runs fork code with it. repo-lint enforces this.
 on:  # zizmor: ignore[dangerous-triggers]
   pull_request_target:
     types: [opened, synchronize, reopened]
 
-# pull_request_target runs with a writable token against the BASE repository so
-# a fork pull request can be labelled. It deliberately never checks out the
-# pull request head: do not add a checkout step here.
 permissions: {}
 
 concurrency:

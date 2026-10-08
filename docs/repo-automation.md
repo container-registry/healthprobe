@@ -1,7 +1,7 @@
 # Repository Automation
 
-What each piece of automation does, what it needs, and when it is safe to remove. Every workflow repeats the
-short version of this in a header comment; this is the map.
+What each piece of automation does, what it needs, and when it is safe to remove. The workflows do not repeat
+this in header comments; this is the map.
 
 ## Workflows
 
@@ -17,8 +17,8 @@ short version of this in a header comment; this is the map.
 | `welcome.yml` | Greets first-time contributors. | nothing |
 | `apply-settings.yml` | Applies `.github/settings.yml`, and checks for drift weekly. | `SETTINGS_TOKEN` |
 | `release-please.yml` | Opens the app and chart release pull requests and triggers publishing. | nothing |
-| `release-assets.yml` | Builds, attests and uploads binaries and their SBOM, from the commit the release tag resolves to. | nothing |
-| `publish-image.yml` | Builds, pushes to `8gears.container-registry.com/healthprobe/healthprobe`, verifies the platform set (`task image:verify`), signs and attests the image, from the commit the release tag resolves to. | the federated Harbor robot, see [Image registry](#image-registry) |
+| `release-assets.yml` | Builds, attests and uploads binaries and their SBOM, from the commit the release tag resolves to. Called by `release-please.yml`: delete its `publish-release-assets` job with it. Does nothing without `go.mod`. | nothing |
+| `publish-image.yml` | Builds, pushes to `8gears.container-registry.com/healthprobe/healthprobe`, verifies the platform set (`task image:verify`), signs and attests the image, from the commit the release tag resolves to. Called by `release-please.yml`: delete its `publish-image` job with it. | the federated Harbor robot, see [Image registry](#image-registry) |
 | `pr-image.yml` | Builds, pushes to `8gears.container-registry.com/8gcr-dev/healthprobe`, signs and SBOM-attests a preview image per pull request, `pr-<N>`, and comments the reference. Runs when the diff against `main` touches an image input; in a stack only for the top pull request. | the federated Harbor robot; skipped for fork and Dependabot pull requests |
 
 ## Configuration

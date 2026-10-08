@@ -1,10 +1,6 @@
 ---
 name: Apply Repository Settings
 
-# What: Applies .github/settings.yml to the repository and reports drift.
-# Fires on: push to main touching settings, a weekly drift check, or manual dispatch.
-# Needs: SETTINGS_TOKEN, a fine-grained PAT with Administration read/write. Without it the job reports what it skipped and succeeds.
-# Safe to delete if: repository settings are managed by hand. Delete .github/settings.yml and the script with it.
 on:
   push:
     branches: [main]
@@ -12,7 +8,7 @@ on:
       - '.github/settings.yml'
       - '.github/scripts/apply-settings.js'
   schedule:
-    - cron: '0 9 * * 1'  # Weekly Monday 9am UTC - drift check
+    - cron: '0 9 * * 1'
   workflow_dispatch:
     inputs:
       mode:
@@ -24,19 +20,6 @@ on:
         options: [verify, apply, check]
         default: verify
 
-# GITHUB_TOKEN can manage labels but nothing else here: repository settings,
-# security toggles and rulesets all need administration access.
-#
-# For the rest, add a SETTINGS_TOKEN secret holding a fine-grained personal
-# access token scoped to this repository alone, with
-#   Administration: read and write
-#   Metadata: read
-#   Issues: read and write        (labels are managed through the Issues API)
-# A classic `repo`-scope token also works but grants far more than is needed.
-#
-# Without the secret the job reports what it skipped and succeeds; a brand new
-# repository should not greet its owner with a red run it cannot fix.
-
 permissions: {}
 
 concurrency:
@@ -44,8 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The secrets context cannot be used in a job-level `if`, so availability is
-  # resolved once here and tested per step.
+  # The secrets context is not available in a job-level `if`.
   HAS_SETTINGS_TOKEN: ${{ secrets.SETTINGS_TOKEN != '' }}
 
 jobs:
@@ -56,21 +38,14 @@ jobs:
       contents: read
       # Labels are managed through the Issues API.
       issues: write
-    # Applying settings to a fork would rewrite somebody else's repository.
     if: ${{ !github.event.repository.fork }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
-      # settings.yml is converted to JSON so the script below needs no YAML
-      # parser, which keeps every third-party dependency out of the one job
-      # that can hold an administration token.
-      #
-      # PyYAML ships on GitHub's Ubuntu runners and is required, not fetched:
-      # an unpinned PyPI install here would execute third-party code in the
-      # workspace before the step that uses the token, including code able to
-      # rewrite apply-settings.js. A runner without it fails loudly instead.
+      # No YAML parser for the script and no pip install: third-party code in this job could
+      # rewrite apply-settings.js before it runs with the administration token.
       - name: Convert settings.yml to JSON
         if: env.HAS_SETTINGS_TOKEN == 'true'
         run: |
@@ -88,7 +63,6 @@ jobs:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         if: env.HAS_SETTINGS_TOKEN == 'true'
         env:
-          # schedule has no inputs, so a cron run is a drift check; everything else applies and verifies.
           INPUT_MODE: ${{ inputs.mode || (github.event_name == 'schedule' && 'check' || 'verify') }}
           SETTINGS_JSON: settings.json
         with:
