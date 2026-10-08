@@ -3,17 +3,9 @@ name: Publish Image
 
 # What: Builds, pushes, verifies, signs and attests the container image.
 # Fires on: called by release-please.yml after a release is created.
-# Needs: nothing for GHCR. Another registry needs a login step and its credentials. The tag must belong to a published release whose target is the tagged commit, which is how release-please creates them.
+# Needs: no secrets. The image goes to the `healthprobe` project on 8gears.container-registry.com (8gcr), authenticated keylessly: the job's GitHub OIDC token is the password of the federated Harbor robot `robot_gh-healthprobe-push`, whose claim rules accept only this workflow on main (`job_workflow_ref`). REGISTRY_ADDRESS and REGISTRY_PROJECT repository variables override the target. The tag must belong to a published release whose target is the tagged commit, which is how release-please creates them.
 # Safe to delete if: the project publishes no container image. Remove the caller in release-please.yml too.
 #
-# Builds, pushes, signs and attests the container image.
-#
-# Defaults to GHCR authenticated with GITHUB_TOKEN, so it works in a fresh
-# repository with no secrets configured. Point `image` somewhere else and add
-# a login step if the project publishes to another registry.
-#
-# Delete this workflow and its caller in release-please.yml if the project does
-# not ship a container image.
 
 on:
   workflow_call:
@@ -45,9 +37,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: write
-      # Keyless signing and provenance: a short-lived OIDC identity instead of
-      # a long-lived signing key.
       id-token: write
       attestations: write
     outputs:
@@ -124,20 +113,31 @@ jobs:
           # Interpolated through the environment rather than inline, so a value
           # containing shell metacharacters cannot alter the command.
           OVERRIDE: ${{ inputs.image }}
-          DEFAULT: ghcr.io/${{ github.repository }}
+          DEFAULT: ${{ vars.REGISTRY_ADDRESS || '8gears.container-registry.com' }}/${{ vars.REGISTRY_PROJECT || 'healthprobe' }}/${{ github.event.repository.name }}
         run: |
           set -euo pipefail
           image="${OVERRIDE:-$DEFAULT}"
-          # GHCR requires a lowercase path; repository names are not.
           echo "image=$(echo "$image" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "registry=${image%%/*}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
 
+      - name: Mint an OIDC token for Harbor
+        id: harbor-oidc
+        env:
+          AUDIENCE: https://${{ steps.target.outputs.registry }}
+        run: |
+          set -euo pipefail
+          token=$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | jq -r '.value')
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ steps.target.outputs.registry }}
+          username: jwt
+          password: ${{ steps.harbor-oidc.outputs.token }}
 
       - name: Build and push
         id: build

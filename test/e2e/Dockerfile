@@ -1,6 +1,4 @@
-# End-to-end fixtures: the probe from the release image next to a test server,
-# in a FROM scratch image with no shell, so every HEALTHCHECK below can only
-# work in exec form. Each target is one scenario; test/e2e/run.sh builds them.
+# No shell in scratch, so every HEALTHCHECK must work in exec form.
 
 ARG PROBE_IMAGE=localhost/healthprobe:e2e
 
@@ -29,6 +27,5 @@ HEALTHCHECK --interval=2s --timeout=3s --retries=2 CMD ["/healthprobe", "-port",
 FROM base AS tls
 HEALTHCHECK --interval=2s --timeout=3s --retries=2 CMD ["/healthprobe", "-port", "8443", "-endpoint", "/healthz", "-tls", "-tls-no-verify"]
 
-# The lprobe spelling of the flags, against the plain-HTTP variant.
 FROM base AS notls
 HEALTHCHECK --interval=2s --timeout=3s --retries=2 CMD ["/healthprobe-notls", "-mode=http", "-port=8080", "-endpoint=/healthz"]

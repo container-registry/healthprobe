@@ -162,7 +162,6 @@ tasks:
       CGO_ENABLED: '1'
     cmds:
       - go test -race -coverprofile=coverage.out -covermode=atomic ./...
-      # The notls variant compiles different files; its tests must run too.
       - go test -race -tags notls .
 
   lint:
@@ -393,8 +392,6 @@ tasks:
     desc: Fail if the probe links anything outside the Go standard library
     status: ['! test -f go.mod']
     cmds:
-      # The project's reason to exist is a probe with no third-party code in
-      # it, so a dependency is a build failure, not a review comment.
       - |
         for tags in "" notls; do
           extra=$(go list -tags "$tags" -deps -f '{{"{{"}}if not .Standard{{"}}"}}{{"{{"}}.ImportPath{{"}}"}}{{"{{"}}end{{"}}"}}' . | grep -vx "$(go list -m)" || true)
@@ -414,8 +411,7 @@ tasks:
       GOOS: linux
       GOARCH: amd64
     cmds:
-      # Budgets sit about 15% above the 1.0.0 sizes. Crossing one means an
-      # import pulled in something heavy (net/http alone adds ~3 MB).
+      # ~15% above the 1.0.0 sizes; net/http alone would add ~3 MB.
       - |
         out=$(mktemp -d "${TMPDIR:-/tmp}/size.XXXXXX")
         trap 'rm -rf "$out"' EXIT

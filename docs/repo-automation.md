@@ -18,8 +18,8 @@ short version of this in a header comment; this is the map.
 | `apply-settings.yml` | Applies `.github/settings.yml`, and checks for drift weekly. | `SETTINGS_TOKEN` |
 | `release-please.yml` | Opens the app and chart release pull requests and triggers publishing. | nothing |
 | `release-assets.yml` | Builds, attests and uploads binaries and their SBOM, from the commit the release tag resolves to. | nothing |
-| `publish-image.yml` | Builds, pushes, verifies the platform set (`task image:verify`), signs and attests the container image, from the commit the release tag resolves to. | nothing for GHCR |
-| `pr-image.yml` | Builds, pushes, signs and SBOM-attests a preview image per pull request, `pr-<N>`, and comments the reference. Runs when the diff against `main` touches an image input; in a stack only for the top pull request. | nothing for GHCR |
+| `publish-image.yml` | Builds, pushes to `8gears.container-registry.com/healthprobe/healthprobe`, verifies the platform set (`task image:verify`), signs and attests the image, from the commit the release tag resolves to. | the federated Harbor robot, see [Image registry](#image-registry) |
+| `pr-image.yml` | Builds, pushes to `8gears.container-registry.com/8gcr-dev/healthprobe`, signs and SBOM-attests a preview image per pull request, `pr-<N>`, and comments the reference. Runs when the diff against `main` touches an image input; in a stack only for the top pull request. | the federated Harbor robot; skipped for fork and Dependabot pull requests |
 
 ## Configuration
 
@@ -41,9 +41,29 @@ short version of this in a header comment; this is the map.
 |------|---------|
 | `.github/scripts/apply-settings.js` | Applies, verifies or drift-checks `settings.yml`. Reads JSON the workflow converts, so it needs no YAML parser |
 | `.github/scripts/repo-lint.py` | Repository consistency checks, also run by `task lint:repo` |
-| `release-please.yml` | Opens the app and chart release pull requests and triggers publishing. | nothing |
-| `release-assets.yml` | Builds, attests and uploads binaries and their SBOM, from the commit the release tag resolves to. | nothing |
-| `publish-image.yml` | Builds, pushes, verifies the platform set (`task image:verify`), signs and attests the container image, from the commit the release tag resolves to. | nothing for GHCR |
+
+## Image registry
+
+Images go to Harbor at `8gears.container-registry.com` (8gcr), never to GHCR. Both projects are public.
+
+| What | Where | Pushed by |
+|------|-------|-----------|
+| Releases | `8gears.container-registry.com/healthprobe/healthprobe:vX.Y.Z` and `:latest` | `robot_gh-healthprobe-push` (id 1060202), push on `healthprobe` only |
+| Pull request previews | `8gears.container-registry.com/8gcr-dev/healthprobe:pr-<N>` | `robot_gh-healthprobe-preview` (id 1060235), push on `8gcr-dev` only |
+
+There is no registry secret. Each publishing job mints a GitHub OIDC token whose audience is `https://` plus the
+registry address (`https://8gears.container-registry.com` by default) and logs in with it as the password, username
+`jwt`. Harbor picks the federated robot whose claim rules all match the token, preferring the one with the most rules:
+
+- The preview robot requires `repository == container-registry/healthprobe`.
+- The release robot also requires `job_workflow_ref == container-registry/healthprobe/.github/workflows/publish-image.yml@refs/heads/main`.
+  A workflow run from a pull request branch cannot produce that value, so it can never overwrite a release tag.
+
+Releases carry a cosign signature, an SBOM attestation and a build provenance attestation, stored next to the
+image. Previews carry the signature and the SBOM attestation only.
+
+To publish elsewhere, set the `REGISTRY_ADDRESS`, `REGISTRY_PROJECT` and `PR_REGISTRY_PROJECT` repository variables.
+The target registry needs federated robots of its own that trust GitHub's issuer, with the same claim split.
 
 ## Secrets
 

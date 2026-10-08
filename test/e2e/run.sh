@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Runs the HEALTHCHECK scenarios in test/e2e/Dockerfile under a container
-# engine and checks the health status the engine itself records.
-#
-#   ENGINE=docker test/e2e/run.sh
-#   ENGINE=podman test/e2e/run.sh
+# Usage: ENGINE=docker|podman test/e2e/run.sh
 set -euo pipefail
 
 ENGINE="${ENGINE:-docker}"
@@ -11,8 +7,7 @@ TIMEOUT="${TIMEOUT:-40}"
 PROBE_IMAGE=localhost/healthprobe:e2e
 cd "$(dirname "$0")/../.."
 
-# Podman's default image format is OCI, whose config has no healthcheck field:
-# HEALTHCHECK is dropped with only a warning. Docker format keeps it.
+# The OCI image format has no healthcheck field; podman drops HEALTHCHECK without it.
 build_flags=()
 [ "$ENGINE" = podman ] && build_flags=(--format docker)
 
@@ -36,9 +31,7 @@ check() {
   for _ in $(seq "$TIMEOUT"); do
     status=$("$ENGINE" inspect -f '{{.State.Health.Status}}' "$name" 2>/dev/null || true)
     [ "$status" = "$want" ] && break
-    # Podman runs healthchecks from systemd timers, which a rootless or
-    # machine-less setup may not have; running the check by hand updates the
-    # same recorded status.
+    # Podman's healthcheck timers need systemd, which CI runners may lack.
     [ "$ENGINE" = podman ] && "$ENGINE" healthcheck run "$name" >/dev/null 2>&1 || true
     sleep 1
   done
@@ -58,7 +51,6 @@ check tls healthy
 check notls healthy
 
 if [ "$ENGINE" = podman ]; then
-  # Documents the format trap above rather than testing the probe.
   "$ENGINE" build -q --target healthy --build-arg "PROBE_IMAGE=${PROBE_IMAGE}" \
     -t localhost/healthprobe-e2e:oci -f test/e2e/Dockerfile . >/dev/null 2>&1
   oci=$("$ENGINE" image inspect -f '{{json .HealthCheck}}' localhost/healthprobe-e2e:oci 2>/dev/null || echo error)

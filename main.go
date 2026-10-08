@@ -1,11 +1,7 @@
-// Command healthprobe checks an HTTP endpoint on the loopback interface and
-// exits 0 when it answers with an accepted status code, 1 otherwise. It is
-// built for container HEALTHCHECK and Kubernetes exec probes in images that
-// have no shell, curl or wget.
+// Command healthprobe is an HTTP health probe for images without a shell.
 //
-// The request is written by hand on a raw connection instead of going through
-// net/http: that package alone more than doubles the binary, and a probe needs
-// only the status line.
+// The request is written on a raw connection because net/http alone more than
+// doubles the binary, and a probe needs only the status line.
 package main
 
 import (
@@ -21,17 +17,14 @@ import (
 	"time"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-// Docker reserves exit code 2 and treats anything but 0 and 1 as undefined,
-// so every failure, including bad flags, exits 1.
+// Docker reserves exit code 2, so every failure, bad flags included, exits 1.
 const (
 	exitHealthy   = 0
 	exitUnhealthy = 1
 )
 
-// maxStatusLine bounds how much a misbehaving server can make the probe read.
 const maxStatusLine = 4096
 
 type config struct {
@@ -135,8 +128,7 @@ func parseFlags(args []string, stderr io.Writer) (config, bool, error) {
 	if !strings.HasPrefix(cfg.endpoint, "/") {
 		cfg.endpoint = "/" + cfg.endpoint
 	}
-	// A space or control character would end the request line early and let
-	// the rest of the value be read as headers.
+	// Whitespace would end the request line and smuggle the rest in as headers.
 	if strings.ContainsFunc(cfg.endpoint, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
 		return cfg, false, fmt.Errorf("-endpoint %q contains whitespace or control characters; percent-encode them", cfg.endpoint)
 	}
@@ -191,8 +183,7 @@ func probe(cfg config, stderr io.Writer) error {
 		fmt.Fprintf(stderr, "GET %s://%s%s\n", scheme, addr, cfg.endpoint)
 	}
 
-	// HTTP/1.1 with Connection: close rather than HTTP/1.0: some servers
-	// answer 1.0 requests differently, and a probe should see what clients see.
+	// Not HTTP/1.0: some servers answer it differently from what clients get.
 	req := "GET " + cfg.endpoint + " HTTP/1.1\r\n" +
 		"Host: " + hostHeader(cfg) + "\r\n" +
 		"User-Agent: " + cfg.userAgent + "\r\n" +
@@ -215,8 +206,7 @@ func probe(cfg config, stderr io.Writer) error {
 	return nil
 }
 
-// hostHeader is "localhost" for loopback addresses because virtual-host
-// routing (nginx server_name, ingress-style muxes) matches names, not IPs.
+// Loopback becomes "localhost" because virtual-host routing matches names.
 func hostHeader(cfg config) string {
 	host := cfg.host
 	if cfg.tls && cfg.tlsServerName != "" {
@@ -233,13 +223,9 @@ func hostHeader(cfg config) string {
 	return net.JoinHostPort(host, strconv.Itoa(cfg.port))
 }
 
-// maxInterim caps how many 1xx responses are skipped, so a server cannot keep
-// the probe reading until its deadline with an endless stream of them.
 const maxInterim = 8
 
-// readFinalStatus skips interim 1xx responses (103 Early Hints, an unasked-for
-// 100 Continue) and returns the final status. 101 is final: nothing follows it
-// on a connection that switched protocols. The body is never read.
+// 101 is final: nothing follows it on a connection that switched protocols.
 func readFinalStatus(r *bufio.Reader) (int, string, error) {
 	for range maxInterim {
 		code, line, err := readStatus(r)
@@ -265,7 +251,6 @@ func skipHeaders(r *bufio.Reader) error {
 	}
 }
 
-// readStatus returns the status code from an HTTP/1.x status line.
 func readStatus(r *bufio.Reader) (int, string, error) {
 	raw, err := r.ReadSlice('\n')
 	if err != nil {
@@ -290,7 +275,6 @@ func readStatus(r *bufio.Reader) (int, string, error) {
 	return code, line, nil
 }
 
-// codeSet is a bitmap over 100-599, the only codes a status line can carry.
 type codeSet [600]bool
 
 func (s *codeSet) contains(code int) bool {
