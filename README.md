@@ -17,12 +17,12 @@ build fails if one is linked in, and also fails if a binary grows past its size 
 
 ## Install
 
-Copy it out of the release image. Both binaries are at the image root, and the image is published for
-`linux/amd64` and `linux/arm64`:
+Copy it out of the release image, `8gears.container-registry.com/healthprobe/healthprobe`. It is public, so no login
+is needed. Both binaries are at the image root, and the image is published for `linux/amd64` and `linux/arm64`:
 
 ```dockerfile
 FROM scratch
-COPY --from=ghcr.io/container-registry/healthprobe:v1.0.0 /healthprobe-notls /healthprobe
+COPY --from=8gears.container-registry.com/healthprobe/healthprobe:v1.0.0 /healthprobe-notls /healthprobe
 COPY my-service /my-service
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 CMD ["/healthprobe", "-port", "8080", "-endpoint", "/healthz"]
 ENTRYPOINT ["/my-service"]
@@ -81,17 +81,6 @@ readinessProbe:
   exec:
     command: ["/healthprobe", "-port", "8080", "-endpoint", "/healthz"]
 ```
-
-### Migrating from lprobe
-
-`healthprobe` accepts the flags of [lprobe](https://github.com/fivexl/lprobe)'s HTTP mode as they are:
-`-mode=http`, `-port`, `-endpoint`, `-ipv6`, `-http-codes`, `-user-agent`, `-connect-timeout` (an alias of
-`-timeout`), `-tls`, `-tls-no-verify`, `-tls-ca-cert`, `-tls-server-name` and `-v`. Swap the binary and keep the
-`HEALTHCHECK` lines. The differences:
-
-- gRPC mode, SPIFFE, ALTS and TLS client certificates are not supported.
-- The default timeout is 5s rather than 1s, and it covers the whole check.
-- Redirects are not followed.
 
 ## Development
 
