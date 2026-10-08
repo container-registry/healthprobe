@@ -18,11 +18,8 @@ short version of this in a header comment; this is the map.
 | `apply-settings.yml` | Applies `.github/settings.yml`, and checks for drift weekly. | `SETTINGS_TOKEN` |
 | `release-please.yml` | Opens the app and chart release pull requests and triggers publishing. | nothing |
 | `release-assets.yml` | Builds, attests and uploads binaries and their SBOM, from the commit the release tag resolves to. | nothing |
-| `chart-ci.yml` | Lints, renders, unit-tests, scans and dry-run packages the Helm chart. Path-filtered, so never a required check. | nothing |
-| `publish-chart.yml` | Packages, pushes, signs and documents the chart for a `chart-v*` release. | nothing for ttl.sh; `CHART_REPOSITORY` and the registry secrets for a real registry |
 | `publish-image.yml` | Builds, pushes, verifies the platform set (`task image:verify`), signs and attests the container image, from the commit the release tag resolves to. | nothing for GHCR |
 | `pr-image.yml` | Builds, pushes, signs and SBOM-attests a preview image per pull request, `pr-<N>`, and comments the reference. Runs when the diff against `main` touches an image input; in a stack only for the top pull request. | nothing for GHCR |
-| `pr-chart.yml` | Packages, pushes and signs a preview chart per pull request, `X.Y.Z-pr.<N>`, and comments the install command. Same rules, chart inputs. | nothing for ttl.sh; `CHART_REPOSITORY` and the registry secrets for a real registry |
 
 ## Configuration
 
@@ -36,9 +33,6 @@ short version of this in a header comment; this is the map.
 | `versions.env` | Every tool version pin, read by both the Taskfile and CI |
 | `.yamllint`, `.golangci.yaml` | Linter configuration |
 | `.release-please/config-app.json`, `.release-please/manifest-app.json`, `version.txt` | Release state. The directory is excluded from releases, so a second release line (a chart, say) can exclude the app line's state the same way |
-| `taskfile/helm.yml`, `taskfile/ct-lintconf.yaml` | The chart's tasks under `task helm:*`, and the chart-testing lint config that tolerates release-please's `# x-release-please-version` stamp |
-| `deploy/chart/` | The Helm chart, its tests, schema, changelog and Artifact Hub metadata |
-| `.release-please/config-chart.json`, `.release-please/manifest-chart.json` | The chart release line's state |
 | `optional/renovate.json` | Renovate config: a replacement for Dependabot, or a complement limited to `versions.env` and the base image digest |
 
 ## Scripts
@@ -49,8 +43,6 @@ short version of this in a header comment; this is the map.
 | `.github/scripts/repo-lint.py` | Repository consistency checks, also run by `task lint:repo` |
 | `release-please.yml` | Opens the app and chart release pull requests and triggers publishing. | nothing |
 | `release-assets.yml` | Builds, attests and uploads binaries and their SBOM, from the commit the release tag resolves to. | nothing |
-| `chart-ci.yml` | Lints, renders, unit-tests, scans and dry-run packages the Helm chart. Path-filtered, so never a required check. | nothing |
-| `publish-chart.yml` | Packages, pushes, signs and documents the chart for a `chart-v*` release. | nothing for ttl.sh; `CHART_REPOSITORY` and the registry secrets for a real registry |
 | `publish-image.yml` | Builds, pushes, verifies the platform set (`task image:verify`), signs and attests the container image, from the commit the release tag resolves to. | nothing for GHCR |
 
 ## Secrets
@@ -59,7 +51,6 @@ short version of this in a header comment; this is the map.
 |--------|---------|------------|
 | `SETTINGS_TOKEN` | `apply-settings.yml` | The job reports what it skipped and succeeds. `GITHUB_TOKEN` can only manage labels. |
 | `SCORECARD_TOKEN` | `scorecard.yml` | Branch protection is not scored. Everything else works. |
-| `CHART_REGISTRY_USERNAME`, `CHART_REGISTRY_PASSWORD` | `publish-chart.yml` | The chart is pushed anonymously to ttl.sh, where it expires within 24 hours. Set `CHART_REPOSITORY` and these to publish somewhere durable. |
 
 Use a fine-grained personal access token scoped to this repository, with **Administration: read and write** and
 **Metadata: read**.
@@ -80,12 +71,6 @@ Use a fine-grained personal access token scoped to this repository, with **Admin
   match no `branches: [main]` trigger.
 - **`pull_request_target` workflows must never check out the pull request.** Three workflows use that trigger and
   say so; `repo-lint` fails the build if one ever gains a checkout step.
-<!-- pack:chart:start -->
-- **A `(chart)`-scoped pull request that touches a file outside the app line's excluded paths bumps the app
-  version.** Not anything outside `deploy/chart`: `docs`, `.github`, `.release-please`, `deploy` and `taskfile`
-  are excluded, so it takes a root file such as `Taskfile.yml` or `versions.env`. release-please filters by
-  path, not by scope, and `Chart Scope Paths` fails the pull request; split it.
-<!-- pack:chart:end -->
 - **A `feat:` confined to an excluded path releases nothing.** `exclude-paths` is set to `docs`, `.github`, `.release-please`, `deploy` and `taskfile`,
   and it is evaluated per file: one file outside pulls the whole commit back in.
 - **An open release pull request only refreshes when its body would change.** `always-update: true` in

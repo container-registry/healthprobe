@@ -6,9 +6,9 @@
 #
 # Keep in sync with MAINTAINERS.md.
 
-* @{{ORG_NAME}}/maintainers
+* @container-registry/maintainers
 
 # Changes here alter what runs with repository credentials, so they get a
 # closer look than the rest of the tree.
-/.github/                @{{ORG_NAME}}/maintainers
-/SECURITY.md             @{{ORG_NAME}}/maintainers
+/.github/                @container-registry/maintainers
+/SECURITY.md             @container-registry/maintainers

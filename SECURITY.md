@@ -6,9 +6,9 @@
 
 Report it privately, either way:
 
-- **GitHub** (preferred): [open a private security advisory](https://github.com/{{ORG_NAME}}/{{REPO_NAME}}/security/advisories/new).
+- **GitHub** (preferred): [open a private security advisory](https://github.com/container-registry/healthprobe/security/advisories/new).
   This keeps the report, the discussion, the fix, and the eventual CVE in one place.
-- **Email**: {{SECURITY_EMAIL}}. Say so in the first message if you need an encrypted channel.
+- **Email**: security@8gears.com. Say so in the first message if you need an encrypted channel.
 
 Please include whatever you have:
 

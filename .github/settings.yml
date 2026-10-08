@@ -20,7 +20,7 @@ repository:
   #   is_template - every repository created from the template would itself
   #                 become a template.
   # Leave description and topics empty rather than inheriting the template's.
-  description: ""
+  description: "Static, dependency-free HTTP health probe for container HEALTHCHECKs in scratch and distroless images"
   homepage: ""
   topics: []
   has_issues: true
@@ -72,9 +72,6 @@ labels:
   component/config:
     color: c5def5
     description: Configuration related
-  component/chart:
-    color: 0e8a16
-    description: The Helm chart under deploy/chart
   dependencies:
     color: 0366d6
     description: Dependencies update

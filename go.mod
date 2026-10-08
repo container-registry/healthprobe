@@ -1,3 +1,3 @@
-module github.com/container-registry/oss-project-template
+module github.com/container-registry/healthprobe
 
 go 1.26.6

@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for suggesting a feature!
 
-        **Before submitting**, please search [existing issues](https://github.com/{{ORG_NAME}}/{{REPO_NAME}}/issues) to check if it's already been requested.
+        **Before submitting**, please search [existing issues](https://github.com/container-registry/healthprobe/issues) to check if it's already been requested.
 
   - type: textarea
     id: problem

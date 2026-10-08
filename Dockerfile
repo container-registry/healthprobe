@@ -38,12 +38,12 @@ FROM ${BASE_IMAGE}@${BASE_IMAGE_DIGEST}
 ARG VERSION=dev
 
 # Consumed by tooling and by GitHub to link the image back to this repository.
-LABEL org.opencontainers.image.title="{{REPO_NAME}}" \
-      org.opencontainers.image.description="{{REPO_DESCRIPTION}}" \
-      org.opencontainers.image.source="https://github.com/{{ORG_NAME}}/{{REPO_NAME}}" \
+LABEL org.opencontainers.image.title="healthprobe" \
+      org.opencontainers.image.description="Static, dependency-free HTTP health probe for container HEALTHCHECKs in scratch and distroless images" \
+      org.opencontainers.image.source="https://github.com/container-registry/healthprobe" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.vendor="{{COPYRIGHT_HOLDER}}"
+      org.opencontainers.image.vendor="8gears AG"
 
 COPY --from=builder /out/app /app
 

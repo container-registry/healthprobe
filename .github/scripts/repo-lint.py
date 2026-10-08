@@ -51,7 +51,6 @@ def check_yaml_loads(errors: list[str]) -> None:
     """Every YAML file must fully construct, not merely tokenize.
 
     yamllint parses the event stream and accepts things PyYAML cannot build.
-    An unquoted `url: {{DOCS_URL}}` is a flow mapping used as a mapping key:
     it lints clean and GitHub then rejects the file.
     """
     try:

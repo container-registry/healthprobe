@@ -10,11 +10,6 @@ set: [errexit, pipefail]
 
 dotenv: ['versions.env']
 
-# The Helm chart pack. Delete this block with the pack.
-includes:
-  helm:
-    taskfile: taskfile/helm.yml
-    dir: .
 
 vars:
   # The only definition of the platform set; publish-image.yml reads it back

@@ -6,10 +6,10 @@ By contributing you agree that your contribution is licensed under the terms in 
 
 ## Before You Start
 
-- Search [existing issues](https://github.com/{{ORG_NAME}}/{{REPO_NAME}}/issues) before opening a new one.
-- For anything larger than a bug fix, open a [proposal](https://github.com/{{ORG_NAME}}/{{REPO_NAME}}/issues/new?template=proposal.yml)
+- Search [existing issues](https://github.com/container-registry/healthprobe/issues) before opening a new one.
+- For anything larger than a bug fix, open a [proposal](https://github.com/container-registry/healthprobe/issues/new?template=proposal.yml)
   first. Agreeing on the approach before the code exists saves everyone a rewrite.
-- Questions are welcome as issues, using the [question form](https://github.com/{{ORG_NAME}}/{{REPO_NAME}}/issues/new?template=question.yml).
+- Questions are welcome as issues, using the [question form](https://github.com/container-registry/healthprobe/issues/new?template=question.yml).
 - Never open a public issue for a security problem. Follow [SECURITY.md](SECURITY.md) instead.
 
 ## Local Setup
@@ -39,19 +39,6 @@ task vuln-report:check               # the scanner-health gate CI runs after the
 task vuln-check                      # plain govulncheck, non-zero on any finding
 ```
 
-<!-- pack:chart:start -->
-## Helm Chart
-
-The chart lives in `deploy/chart` and has its own release line. `task helm:ci` runs everything `Chart CI` runs:
-lint (helm, chart-testing, kube-linter, Artifact Hub metadata, values schema), a render, the helm-unittest
-suite, a determinism check, a Trivy scan and a packaging dry run.
-
-Adding a value means touching four places: `values.yaml` with a `# --` helm-docs comment, `values.schema.json`,
-a test under `tests/`, and the README via `task helm:docs`. Scope chart-only pull requests `feat(chart):` or
-`fix(chart):` and keep them inside `deploy/chart`; the `Chart Scope Paths` check fails a chart-scoped pull
-request that also touches an app-release path, because that commit would bump the app version too.
-
-<!-- pack:chart:end -->
 ## Commits
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) and every commit needs a

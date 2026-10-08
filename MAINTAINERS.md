@@ -4,10 +4,10 @@ Maintainers review and merge changes, cut releases, and handle security reports.
 
 | Name | GitHub | Areas |
 |------|--------|-------|
-| {{MAINTAINER_NAME}} | [@{{MAINTAINER_GITHUB}}](https://github.com/{{MAINTAINER_GITHUB}}) | all |
+| Vadim Bauer | [@Vad1mo](https://github.com/Vad1mo) | all |
 
 `.github/CODEOWNERS` is what GitHub uses to request reviews, and it routes to the
-`@{{ORG_NAME}}/maintainers` **team**. Adding a row to the table above therefore does nothing on its own: a new
+`@container-registry/maintainers` **team**. Adding a row to the table above therefore does nothing on its own: a new
 maintainer must also be added to that team, or CODEOWNERS changed to name them directly. Otherwise they are
 listed here and never receive a review request.
 

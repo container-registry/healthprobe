@@ -1,0 +1,6 @@
+# Created from container-registry/oss-project-template.
+# Kept so it is possible to ask which repositories carry which version
+# of the template, and which still carry a defect fixed upstream.
+template_repository: container-registry/oss-project-template
+template_commit: 55e7a120dd0283569707c9514ac49c3665b192c8
+bootstrapped_for: container-registry/healthprobe
