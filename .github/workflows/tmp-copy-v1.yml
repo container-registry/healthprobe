@@ -1,0 +1,69 @@
+---
+name: Copy v1.0.0 to 8gcr
+
+# What: One-off copy of the v1.0.0 image, its cosign signature and attestations, from GHCR to 8gcr.
+# Fires on: this pull request only.
+# Needs: nothing; GITHUB_TOKEN reads GHCR, the federated Harbor robot writes 8gcr.
+# Safe to delete if: always. It is removed before the pull request merges.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  copy:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      SRC: ghcr.io/container-registry/healthprobe@sha256:84228ec44e08d6b51c684b5b3f281d951d87d175ae220f2668b5b2727d3636eb
+      DST: 8gears.container-registry.com/healthprobe/healthprobe
+      DIGEST: sha256:84228ec44e08d6b51c684b5b3f281d951d87d175ae220f2668b5b2727d3636eb
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4  # v2.0.2
+
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
+          printf '%s' "${GH_TOKEN}" | oras login ghcr.io -u "${ACTOR}" --password-stdin
+
+      - name: Log in to 8gcr with the federated robot
+        run: |
+          set -euo pipefail
+          token=$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://8gears.container-registry.com" | jq -r '.value')
+          echo "::add-mask::${token}"
+          printf '%s' "${token}" | docker login 8gears.container-registry.com -u jwt --password-stdin
+          printf '%s' "${token}" | oras login 8gears.container-registry.com -u jwt --password-stdin
+
+      # oras -r carries the OCI referrers (the GitHub provenance bundle);
+      # cosign copy carries the tag-based signature and SBOM attestation.
+      - name: Copy the image index and its referrers
+        run: |
+          set -euo pipefail
+          oras cp -r "${SRC}" "${DST}:v1.0.0"
+          oras tag "${DST}@${DIGEST}" latest
+          cosign copy --force "${SRC}" "${DST}@${DIGEST}"
+
+      - name: Verify the copy
+        run: |
+          set -euo pipefail
+          test "$(oras resolve "${DST}:v1.0.0")" = "${DIGEST}"
+          test "$(oras resolve "${DST}:latest")" = "${DIGEST}"
+          identity='^https://github\.com/container-registry/healthprobe/\.github/workflows/publish-image\.yml@'
+          issuer=https://token.actions.githubusercontent.com
+          cosign verify "${DST}@${DIGEST}" --certificate-identity-regexp "${identity}" --certificate-oidc-issuer "${issuer}" >/dev/null
+          cosign verify-attestation --type spdxjson "${DST}@${DIGEST}" --certificate-identity-regexp "${identity}" --certificate-oidc-issuer "${issuer}" >/dev/null
+          oras discover "${DST}@${DIGEST}" --format tree
+          echo "copied and verified ${DST}@${DIGEST}"
