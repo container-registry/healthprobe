@@ -28,8 +28,12 @@ ARG TARGETARCH
 # -trimpath strips local filesystem paths so two builds of the same commit
 # produce the same binary. The version is stamped in so the binary can report
 # which release it came from.
+# Both variants ship in the image, so a consumer picks one with COPY --from
+# and never needs a second image reference.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/app .
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/healthprobe . && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -trimpath -tags notls -ldflags="-s -w -X main.version=${VERSION}" -o /out/healthprobe-notls .
 
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}@${BASE_IMAGE_DIGEST}
@@ -45,10 +49,10 @@ LABEL org.opencontainers.image.title="healthprobe" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.vendor="8gears AG"
 
-COPY --from=builder /out/app /app
+COPY --from=builder /out/healthprobe /out/healthprobe-notls /
 
 # The distroless nonroot tag already runs as 65532. Stated explicitly so it
 # survives a base image change.
 USER 65532:65532
 
-ENTRYPOINT ["/app"]
+ENTRYPOINT ["/healthprobe"]

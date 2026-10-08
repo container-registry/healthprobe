@@ -15,7 +15,7 @@ vars:
   # The only definition of the platform set; publish-image.yml reads it back
   # rather than keeping a copy that could drift from what ships.
   IMAGE_PLATFORMS: linux/amd64,linux/arm64
-  RELEASE_BINARY: '{{.RELEASE_BINARY | default "app"}}'
+  RELEASE_BINARY: '{{.RELEASE_BINARY | default "healthprobe"}}'
   RELEASE_DIST: '{{.RELEASE_DIST | default "dist"}}'
   RELEASE_PACKAGE: '{{.RELEASE_PACKAGE | default "."}}'
 
@@ -44,6 +44,8 @@ tasks:
       - task: lint
       - task: test
       - task: tidy-check
+      - task: deps-check
+      - task: size-check
       - task: license-check
 
   # --- Language-neutral gates ---------------------------------------------
@@ -160,6 +162,8 @@ tasks:
       CGO_ENABLED: '1'
     cmds:
       - go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      # The notls variant compiles different files; its tests must run too.
+      - go test -race -tags notls .
 
   lint:
     desc: Run the Go linter
@@ -304,6 +308,25 @@ tasks:
           echo "Verified ${reference}: $(printf '%s' "${actual}" | tr '\n' ' ')"
         silent: true
 
+  e2e:docker:
+    desc: Run the HEALTHCHECK scenarios in shell-less images under Docker
+    cmds:
+      - test/e2e/run.sh
+    env:
+      ENGINE: docker
+
+  e2e:podman:
+    desc: Run the HEALTHCHECK scenarios under Podman (natively; a newer remote client can drop healthchecks)
+    cmds:
+      - test/e2e/run.sh
+    env:
+      ENGINE: podman
+
+  e2e:kind:
+    desc: Run the probe as Kubernetes exec probes in a throwaway kind cluster (KEEP=1 keeps it)
+    cmds:
+      - test/e2e/kind.sh
+
   vuln-check:
     desc: Check dependencies for known vulnerabilities (fails on any finding; CI uses vuln-report)
     status: ['! test -f go.mod']
@@ -366,6 +389,45 @@ tasks:
       -out /dev/null -step-summary=false -github-output=false
       -fail-on-scanner-error
 
+  deps-check:
+    desc: Fail if the probe links anything outside the Go standard library
+    status: ['! test -f go.mod']
+    cmds:
+      # The project's reason to exist is a probe with no third-party code in
+      # it, so a dependency is a build failure, not a review comment.
+      - |
+        for tags in "" notls; do
+          extra=$(go list -tags "$tags" -deps -f '{{"{{"}}if not .Standard{{"}}"}}{{"{{"}}.ImportPath{{"}}"}}{{"{{"}}end{{"}}"}}' . | grep -vx "$(go list -m)" || true)
+          if [ -n "$extra" ]; then
+            echo "ERROR: non-stdlib packages linked (tags='${tags}'):"
+            echo "$extra"
+            exit 1
+          fi
+        done
+        echo "Only the standard library is linked."
+
+  size-check:
+    desc: Fail if a stripped linux/amd64 binary grows past its budget
+    status: ['! test -f go.mod']
+    env:
+      CGO_ENABLED: '0'
+      GOOS: linux
+      GOARCH: amd64
+    cmds:
+      # Budgets sit about 15% above the 1.0.0 sizes. Crossing one means an
+      # import pulled in something heavy (net/http alone adds ~3 MB).
+      - |
+        out=$(mktemp -d "${TMPDIR:-/tmp}/size.XXXXXX")
+        trap 'rm -rf "$out"' EXIT
+        check() {
+          go build -trimpath -ldflags="-s -w" -tags "$1" -o "$out/bin" .
+          size=$(wc -c < "$out/bin" | tr -d ' ')
+          echo "${2}: ${size} bytes (budget ${3})"
+          [ "$size" -le "$3" ] || { echo "ERROR: ${2} exceeds its size budget"; exit 1; }
+        }
+        check "" healthprobe 5400000
+        check notls healthprobe-notls 2650000
+
   license-check:
     desc: Check dependency licences against the policy
     status: ['! test -f go.mod']
@@ -413,6 +475,10 @@ tasks:
         vars: {GOOS: darwin, GOARCH: arm64}
       - task: _release-asset
         vars: {GOOS: windows, GOARCH: amd64, EXT: .exe}
+      - task: _release-asset
+        vars: {GOOS: linux, GOARCH: amd64, TAGS: notls, SUFFIX: -notls}
+      - task: _release-asset
+        vars: {GOOS: linux, GOARCH: arm64, TAGS: notls, SUFFIX: -notls}
       - task: release-checksums
 
   release-checksums:
@@ -446,8 +512,9 @@ tasks:
     # binary able to report which release it came from.
     cmd: >-
       go build -trimpath
+      -tags "{{.TAGS}}"
       -ldflags="-s -w -X main.version=$(cat version.txt)"
-      -o "{{.RELEASE_DIST}}/{{.RELEASE_BINARY}}-{{.GOOS}}-{{.GOARCH}}{{.EXT}}"
+      -o "{{.RELEASE_DIST}}/{{.RELEASE_BINARY}}{{.SUFFIX}}-{{.GOOS}}-{{.GOARCH}}{{.EXT}}"
       "{{.RELEASE_PACKAGE}}"
 
   # --- Setup ---------------------------------------------------------------

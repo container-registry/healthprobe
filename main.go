@@ -1,103 +1,296 @@
-// Command app is the minimal program the template's build, test and release
-// pipeline runs against. Replace it with the real project; keep the version
-// variable, which `task release-assets` and the Dockerfile stamp at build time.
+// Command healthprobe checks an HTTP endpoint on the loopback interface and
+// exits 0 when it answers with an accepted status code, 1 otherwise. It is
+// built for container HEALTHCHECK and Kubernetes exec probes in images that
+// have no shell, curl or wget.
+//
+// The request is written by hand on a raw connection instead of going through
+// net/http: that package alone more than doubles the binary, and a probe needs
+// only the status line.
 package main
 
 import (
-	"context"
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
+	"io"
+	"net"
 	"os"
-	"os/signal"
-	"syscall"
+	"strconv"
+	"strings"
 	"time"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
+// Docker reserves exit code 2 and treats anything but 0 and 1 as undefined,
+// so every failure, including bad flags, exits 1.
+const (
+	exitHealthy   = 0
+	exitUnhealthy = 1
+)
+
+// maxStatusLine bounds how much a misbehaving server can make the probe read.
+const maxStatusLine = 4096
+
+type config struct {
+	host          string
+	port          int
+	endpoint      string
+	codes         codeSet
+	timeout       time.Duration
+	userAgent     string
+	tls           bool
+	tlsNoVerify   bool
+	tlsCACert     string
+	tlsServerName string
+	verbose       bool
+}
+
 func main() {
-	showVersion := flag.Bool("version", false, "print the version and exit")
-	// The Helm chart deploys this image with HTTP probes, so the demo must be
-	// able to stay up. Serving is opt-in rather than the default because the
-	// image smoke test in ci.yml runs the container and waits for it to exit.
-	serve := flag.Bool("serve", false, "serve HTTP on -addr until terminated")
-	addr := flag.String("addr", ":8080", "address the -serve listener binds")
-	flag.Parse()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
-	if *serve && !*showVersion {
-		// SIGTERM is what a Kubernetes eviction sends.
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		if err := serveHTTP(ctx, *addr); err != nil {
-			fmt.Fprintln(os.Stderr, "serve failed:", err)
-			os.Exit(1)
+func run(args []string, stdout, stderr io.Writer) int {
+	cfg, showVersion, err := parseFlags(args, stderr)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitHealthy
 		}
-		return
+		fmt.Fprintln(stderr, "healthprobe:", err)
+		return exitUnhealthy
 	}
-
-	out := greeting()
-	if *showVersion {
-		out = version
+	if showVersion {
+		fmt.Fprintln(stdout, version)
+		return exitHealthy
 	}
-
-	if _, err := fmt.Fprintln(os.Stdout, out); err != nil {
-		fmt.Fprintln(os.Stderr, "write failed:", err)
-		os.Exit(1)
+	if err := probe(cfg, stderr); err != nil {
+		fmt.Fprintln(stderr, "healthprobe:", err)
+		return exitUnhealthy
 	}
+	return exitHealthy
 }
 
-func greeting() string {
-	return "Hello, World!"
-}
+func parseFlags(args []string, stderr io.Writer) (config, bool, error) {
+	var (
+		cfg         config
+		mode        string
+		ipv6        bool
+		codes       string
+		showVersion bool
+	)
+	fs := flag.NewFlagSet("healthprobe", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&mode, "mode", "http", "probe mode; only http is supported")
+	fs.StringVar(&cfg.host, "host", "127.0.0.1", "host or IP address to connect to")
+	fs.BoolVar(&ipv6, "ipv6", false, "connect to ::1 instead of 127.0.0.1")
+	fs.IntVar(&cfg.port, "port", 8080, "port to connect to")
+	fs.StringVar(&cfg.endpoint, "endpoint", "/", "request path, with an optional query string")
+	fs.StringVar(&codes, "http-codes", "200-299", "accepted status codes, comma-separated, ranges allowed (e.g. 200,204,300-399)")
+	fs.DurationVar(&cfg.timeout, "timeout", 5*time.Second, "deadline for the whole check: connect, TLS handshake, request and status line")
+	fs.DurationVar(&cfg.timeout, "connect-timeout", 5*time.Second, "alias of -timeout, for lprobe compatibility")
+	fs.StringVar(&cfg.userAgent, "user-agent", "", `User-Agent header (default "healthprobe/<version>")`)
+	fs.BoolVar(&cfg.tls, "tls", false, "use HTTPS")
+	fs.BoolVar(&cfg.tlsNoVerify, "tls-no-verify", false, "with -tls, do not verify the server certificate")
+	fs.StringVar(&cfg.tlsCACert, "tls-ca-cert", "", "with -tls, PEM file with the CA certificates to verify the server against")
+	fs.StringVar(&cfg.tlsServerName, "tls-server-name", "", "with -tls, name to verify the server certificate against")
+	fs.BoolVar(&cfg.verbose, "v", false, "log the request and the status line to stderr")
+	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
 
-// routes answers the two paths the chart's probes request, and the greeting on
-// the root path. `{$}` matches only "/", so anything else is a 404.
-func routes() http.Handler {
-	mux := http.NewServeMux()
-	health := func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintln(w, "ok")
+	if err := fs.Parse(args); err != nil {
+		return cfg, false, err
 	}
-	mux.HandleFunc("GET /healthz", health)
-	mux.HandleFunc("GET /readyz", health)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintln(w, greeting())
+	if showVersion {
+		return cfg, true, nil
+	}
+	if fs.NArg() > 0 {
+		return cfg, false, fmt.Errorf("unexpected argument %q; every option is a flag", fs.Arg(0))
+	}
+
+	if mode != "http" {
+		return cfg, false, fmt.Errorf("unsupported -mode %q; only http is supported", mode)
+	}
+	hostSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "host" {
+			hostSet = true
+		}
 	})
-	return mux
+	if ipv6 {
+		if hostSet {
+			return cfg, false, errors.New("-ipv6 and -host are mutually exclusive")
+		}
+		cfg.host = "::1"
+	}
+	if cfg.host == "" {
+		return cfg, false, errors.New("-host must not be empty")
+	}
+	if cfg.port < 1 || cfg.port > 65535 {
+		return cfg, false, fmt.Errorf("-port %d is out of range 1-65535", cfg.port)
+	}
+	if cfg.timeout <= 0 {
+		return cfg, false, fmt.Errorf("-timeout must be greater than zero (got %v)", cfg.timeout)
+	}
+	if !strings.HasPrefix(cfg.endpoint, "/") {
+		cfg.endpoint = "/" + cfg.endpoint
+	}
+	// A space or control character would end the request line early and let
+	// the rest of the value be read as headers.
+	if strings.ContainsFunc(cfg.endpoint, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+		return cfg, false, fmt.Errorf("-endpoint %q contains whitespace or control characters; percent-encode them", cfg.endpoint)
+	}
+	if cfg.userAgent == "" {
+		cfg.userAgent = "healthprobe/" + version
+	}
+	if strings.ContainsAny(cfg.userAgent, "\r\n") {
+		return cfg, false, errors.New("-user-agent must not contain line breaks")
+	}
+
+	set, err := parseCodes(codes)
+	if err != nil {
+		return cfg, false, err
+	}
+	cfg.codes = set
+
+	if !cfg.tls && (cfg.tlsNoVerify || cfg.tlsCACert != "" || cfg.tlsServerName != "") {
+		return cfg, false, errors.New("-tls-no-verify, -tls-ca-cert and -tls-server-name require -tls")
+	}
+	if cfg.tlsNoVerify && (cfg.tlsCACert != "" || cfg.tlsServerName != "") {
+		return cfg, false, errors.New("-tls-no-verify cannot be combined with -tls-ca-cert or -tls-server-name")
+	}
+	if cfg.tls && !tlsSupported {
+		return cfg, false, errors.New("-tls is not available: this binary was built without TLS support")
+	}
+	return cfg, false, nil
 }
 
-func serveHTTP(ctx context.Context, addr string) error {
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: routes(),
-		// Without a header deadline one slow client holds a connection open
-		// for as long as it likes. IdleTimeout has no default of its own: at
-		// zero it falls back to ReadTimeout, which is zero too, so keep-alive
-		// connections would never be reclaimed.
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
+func probe(cfg config, stderr io.Writer) error {
+	deadline := time.Now().Add(cfg.timeout)
+	addr := net.JoinHostPort(cfg.host, strconv.Itoa(cfg.port))
+
+	conn, err := (&net.Dialer{Deadline: deadline}).Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
 	}
 
-	errs := make(chan error, 1)
-	go func() { errs <- srv.ListenAndServe() }()
-
-	select {
-	case err := <-errs:
-		return err
-	case <-ctx.Done():
-		// The pod leaves the Service endpoints at the same moment SIGTERM
-		// arrives, so in-flight requests are drained rather than reset.
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err := srv.Shutdown(shutdown)
-		if errors.Is(err, context.DeadlineExceeded) {
-			// The listener is closed either way, so a drain that runs out of
-			// time is a normal termination and must not exit non-zero.
-			fmt.Fprintln(os.Stderr, "shutdown deadline exceeded; in-flight requests were dropped")
-			return nil
+	scheme := "http"
+	if cfg.tls {
+		scheme = "https"
+		tlsConn, err := wrapTLS(conn, cfg)
+		if err != nil {
+			return err
 		}
+		conn = tlsConn
+	}
+	if cfg.verbose {
+		fmt.Fprintf(stderr, "GET %s://%s%s\n", scheme, addr, cfg.endpoint)
+	}
+
+	// HTTP/1.1 with Connection: close rather than HTTP/1.0: some servers
+	// answer 1.0 requests differently, and a probe should see what clients see.
+	req := "GET " + cfg.endpoint + " HTTP/1.1\r\n" +
+		"Host: " + hostHeader(cfg) + "\r\n" +
+		"User-Agent: " + cfg.userAgent + "\r\n" +
+		"Accept: */*\r\n" +
+		"Connection: close\r\n\r\n"
+	if _, err := io.WriteString(conn, req); err != nil {
+		return fmt.Errorf("sending request: %w", err)
+	}
+
+	code, line, err := readStatus(bufio.NewReaderSize(conn, maxStatusLine))
+	if err != nil {
 		return err
 	}
+	if cfg.verbose {
+		fmt.Fprintln(stderr, line)
+	}
+	if !cfg.codes.contains(code) {
+		return fmt.Errorf("unexpected status: %s", line)
+	}
+	return nil
+}
+
+// hostHeader is "localhost" for loopback addresses because virtual-host
+// routing (nginx server_name, ingress-style muxes) matches names, not IPs.
+func hostHeader(cfg config) string {
+	if cfg.tls && cfg.tlsServerName != "" {
+		return cfg.tlsServerName
+	}
+	host := cfg.host
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		host = "localhost"
+	}
+	if cfg.port == 80 && !cfg.tls || cfg.port == 443 && cfg.tls {
+		return host
+	}
+	return net.JoinHostPort(host, strconv.Itoa(cfg.port))
+}
+
+// readStatus returns the status code from an HTTP/1.x status line. The rest of
+// the response is never read: the connection is closed right after.
+func readStatus(r *bufio.Reader) (int, string, error) {
+	raw, err := r.ReadSlice('\n')
+	if err != nil {
+		if errors.Is(err, bufio.ErrBufferFull) {
+			return 0, "", errors.New("status line too long")
+		}
+		if errors.Is(err, io.EOF) && len(raw) == 0 {
+			return 0, "", errors.New("connection closed before a response")
+		}
+		return 0, "", fmt.Errorf("reading status line: %w", err)
+	}
+	line := strings.TrimRight(string(raw), "\r\n")
+	proto, rest, ok := strings.Cut(line, " ")
+	if !ok || !strings.HasPrefix(proto, "HTTP/1.") {
+		return 0, line, fmt.Errorf("not an HTTP/1.x response: %q", line)
+	}
+	codeText, _, _ := strings.Cut(rest, " ")
+	code, err := strconv.Atoi(codeText)
+	if err != nil || len(codeText) != 3 {
+		return 0, line, fmt.Errorf("malformed status line: %q", line)
+	}
+	return code, line, nil
+}
+
+// codeSet is a bitmap over 100-599, the only codes a status line can carry.
+type codeSet [600]bool
+
+func (s *codeSet) contains(code int) bool {
+	return code >= 0 && code < len(s) && s[code]
+}
+
+func parseCodes(spec string) (codeSet, error) {
+	var set codeSet
+	parse := func(s string) (int, error) {
+		n, err := strconv.Atoi(strings.TrimSpace(s))
+		if err != nil || n < 100 || n > 599 {
+			return 0, fmt.Errorf("-http-codes: %q is not a status code between 100 and 599", s)
+		}
+		return n, nil
+	}
+	for _, part := range strings.Split(spec, ",") {
+		lo, hi, isRange := strings.Cut(part, "-")
+		start, err := parse(lo)
+		if err != nil {
+			return set, err
+		}
+		end := start
+		if isRange {
+			if end, err = parse(hi); err != nil {
+				return set, err
+			}
+			if end < start {
+				return set, fmt.Errorf("-http-codes: range %q is reversed", part)
+			}
+		}
+		for c := start; c <= end; c++ {
+			set[c] = true
+		}
+	}
+	return set, nil
 }
