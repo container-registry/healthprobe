@@ -1,21 +1,12 @@
 ---
 name: PR Size Labeler
 
-# What: Labels pull requests by diff size.
-# Fires on: pull request opened, synchronized or reopened.
-# Needs: nothing.
-# Safe to delete if: size labels are not wanted. Remove the size/* labels from settings.yml too.
-#
-# DO NOT ADD actions/checkout TO THIS WORKFLOW.
-# pull_request_target runs in the base repository's context with a writable
-# token. Checking out the pull request head here executes a fork's code with
-# that token, which is remote code execution against this repository.
-# The trigger is required because a fork pull request must still be labelled by size.
+# DO NOT ADD actions/checkout: pull_request_target holds a writable token, and checking
+# out the PR head runs fork code with it. repo-lint enforces this.
 on:  # zizmor: ignore[dangerous-triggers]
   pull_request_target:
     types: [opened, synchronize, reopened]
 
-# See the note in labeler.yml about pull_request_target. No checkout here either.
 permissions: {}
 
 concurrency:

@@ -2,27 +2,21 @@ const fs = require('fs')
 
 module.exports = async ({ github, context, core }) => {
   const { owner, repo } = context.repo
-  // Converted from .github/settings.yml to JSON by the workflow step before
-  // this one. Parsing the YAML here would mean an npm dependency in the one
-  // job that can hold an administration token.
+  // The previous step converts settings.yml to JSON so this admin-token job needs no npm dependency.
   const settings = JSON.parse(fs.readFileSync(process.env.SETTINGS_JSON, 'utf8'))
   const mode = process.env.INPUT_MODE || (context.eventName === 'schedule' ? 'check' : 'verify')
   core.info(`Mode: ${mode}`)
 
-  // Sections whose current state the token was not allowed to read. They are
-  // dropped from BOTH sides of the drift comparison: "cannot read" is not
-  // "differs", and settings.yml always carries these keys, so comparing them
-  // against an absent export would report drift forever.
+  // Dropped from BOTH sides of the drift comparison: settings.yml always has these
+  // keys, so comparing against an absent export would report drift forever.
   let unreadable = new Set()
 
-  // Apply repository settings
   async function applyRepository() {
     if (!settings.repository) return
     await github.rest.repos.update({ owner, repo, ...settings.repository })
     core.info('✓ repository')
   }
 
-  // Apply default GitHub Actions workflow permissions
   async function applyActions() {
     if (!settings.actions) return
     await github.request('PUT /repos/{owner}/{repo}/actions/permissions/workflow', {
@@ -31,7 +25,6 @@ module.exports = async ({ github, context, core }) => {
     core.info('✓ actions')
   }
 
-  // Apply labels (create or update)
   async function applyLabels() {
     if (!settings.labels) return
     const existing = await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 })
@@ -46,10 +39,6 @@ module.exports = async ({ github, context, core }) => {
     core.info('✓ labels')
   }
 
-  // Apply security settings.
-  //
-  // private_vulnerability_reporting is not part of security_and_analysis; it
-  // has its own endpoint, so it is split out before the rest is passed on.
   async function applySecurity() {
     if (!settings.security) return
     const {
@@ -58,10 +47,8 @@ module.exports = async ({ github, context, core }) => {
       ...securityAndAnalysis
     } = settings.security
 
-    // Alerts first, and before the PATCH: they are the precondition for
-    // dependabot_security_updates, and enabling the updates without them is
-    // rejected. Both of these live on their own endpoints and would also make
-    // the PATCH fail if left in the security_and_analysis body.
+    // Alerts must precede the PATCH or enabling dependabot_security_updates is rejected.
+    // Both keys have their own endpoints and break the PATCH if left in its body.
     for (const [value, path] of [
       [alerts, '/repos/{owner}/{repo}/vulnerability-alerts'],
       [pvr, '/repos/{owner}/{repo}/private-vulnerability-reporting']
@@ -77,7 +64,6 @@ module.exports = async ({ github, context, core }) => {
     core.info('✓ security')
   }
 
-  // Apply code scanning default setup
   async function applyCodeScanning() {
     if (!settings.code_scanning || settings.code_scanning.state !== 'configured') return
     await github.request('PATCH /repos/{owner}/{repo}/code-scanning/default-setup', {
@@ -86,7 +72,6 @@ module.exports = async ({ github, context, core }) => {
     core.info('✓ code_scanning')
   }
 
-  // Apply rulesets (create or update)
   async function applyRulesets() {
     if (!settings.rulesets) return
     let existing = []
@@ -107,7 +92,6 @@ module.exports = async ({ github, context, core }) => {
     core.info('✓ rulesets')
   }
 
-  // Apply branch protection
   async function applyBranches() {
     if (!settings.branches) return
     for (const [branch, config] of Object.entries(settings.branches)) {
@@ -118,7 +102,6 @@ module.exports = async ({ github, context, core }) => {
     core.info('✓ branches')
   }
 
-  // Apply environments
   async function applyEnvironments() {
     if (!settings.environments) return
     for (const [envName, config] of Object.entries(settings.environments)) {
@@ -127,12 +110,8 @@ module.exports = async ({ github, context, core }) => {
     core.info('✓ environments')
   }
 
-  // Apply all settings.
-  //
-  // Every section is attempted even if an earlier one fails, so one permission
-  // gap does not hide the state of the rest -- but the failures are collected
-  // and the job fails. A section that silently did not apply is drift that the
-  // next `check` run would report against a repo nobody knowingly changed.
+  // Attempt every section so one permission gap does not hide the rest, but fail the
+  // job: a silently skipped section shows up later as unexplained drift.
   async function applyAll() {
     const sections = [
       ['repository', applyRepository, true],
@@ -162,13 +141,10 @@ module.exports = async ({ github, context, core }) => {
     return failures.length === 0
   }
 
-  // Export current settings from GitHub
   async function exportSettings() {
     unreadable = new Set()
 
-    // 403/401 means the token may not read this section; anything else (404,
-    // 422) means the feature is genuinely not configured, which is a real
-    // value to compare against.
+    // Only 401/403 mean unreadable; 404/422 mean not configured, a real value to compare.
     const markIfForbidden = (section, e) => {
       if (e.status === 403 || e.status === 401) {
         unreadable.add(section)
@@ -177,8 +153,7 @@ module.exports = async ({ github, context, core }) => {
     }
 
     const { data: r } = await github.rest.repos.get({ owner, repo })
-    // Paginate: a single page caps at 100 and the missing labels then read as
-    // permanent drift.
+    // One page caps at 100; missing labels would read as permanent drift.
     const labels = await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 })
 
     let actionsData
@@ -252,9 +227,7 @@ module.exports = async ({ github, context, core }) => {
         has_wiki: r.has_wiki,
         has_downloads: r.has_downloads,
         has_discussions: r.has_discussions,
-        // visibility and is_template are deliberately absent from
-        // settings.yml, so exporting them would report drift on every run
-        // against keys nothing manages.
+        // visibility and is_template are omitted: settings.yml does not manage them.
         default_branch: r.default_branch,
         allow_forking: r.allow_forking,
         allow_squash_merge: r.allow_squash_merge,
@@ -292,7 +265,6 @@ module.exports = async ({ github, context, core }) => {
       } : undefined
     }
 
-    // Add rulesets if any exist
     if (rulesetsData.length > 0) {
       result.rulesets = Object.fromEntries(rulesetsData.map(rs => {
         const { id, node_id, source, created_at, updated_at, _links, current_user_can_bypass, name, ...rest } = rs
@@ -300,7 +272,6 @@ module.exports = async ({ github, context, core }) => {
       }))
     }
 
-    // Add branch protection if configured
     if (branchProtection) {
       result.branches = {
         [r.default_branch]: {
@@ -324,11 +295,9 @@ module.exports = async ({ github, context, core }) => {
       }
     }
 
-    // Add environments if any exist
     if (environmentsData.length > 0) {
       result.environments = Object.fromEntries(environmentsData.map(env => {
         const { id, node_id, created_at, updated_at, html_url, name, ...rest } = env
-        // Filter out empty values
         const filtered = Object.fromEntries(Object.entries(rest).filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && v.length === 0)))
         return [name, filtered]
       }))
@@ -337,7 +306,6 @@ module.exports = async ({ github, context, core }) => {
     return result
   }
 
-  // Remove nulls and empty objects recursively
   function normalize(obj) {
     if (obj === null || obj === undefined) return undefined
     if (Array.isArray(obj)) {
@@ -357,7 +325,6 @@ module.exports = async ({ github, context, core }) => {
     return obj
   }
 
-  // Sort object keys recursively for stable comparison
   function sortKeys(obj) {
     if (obj === null || obj === undefined) return obj
     if (Array.isArray(obj)) return obj.map(sortKeys)
@@ -370,7 +337,6 @@ module.exports = async ({ github, context, core }) => {
     return obj
   }
 
-  // Detect drift between settings.yml and GitHub
   async function detectDrift() {
     core.info('Exporting current GitHub settings...')
     const current = await exportSettings()
@@ -402,7 +368,6 @@ module.exports = async ({ github, context, core }) => {
     return false
   }
 
-  // Main execution
   if (mode === 'check') {
     core.startGroup('Checking for drift')
     await detectDrift()
@@ -411,7 +376,7 @@ module.exports = async ({ github, context, core }) => {
     core.startGroup('Applying settings')
     await applyAll()
     core.endGroup()
-  } else { // verify
+  } else {
     core.startGroup('Applying settings')
     await applyAll()
     core.endGroup()

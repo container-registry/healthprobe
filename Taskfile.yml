@@ -1,19 +1,11 @@
 version: '3'
 
-# The single entry point for every check and build. CI calls `task <name>`
-# rather than duplicating commands, so a green local run means a green CI run.
-# Tool versions come from versions.env.
-
-# Multi-line scripts stop at the first failing command instead of running on
-# and reporting the exit code of whatever happened to come last.
 set: [errexit, pipefail]
 
 dotenv: ['versions.env']
 
-
 vars:
-  # The only definition of the platform set; publish-image.yml reads it back
-  # rather than keeping a copy that could drift from what ships.
+  # publish-image.yml reads this back via image:platforms; do not copy the list there.
   IMAGE_PLATFORMS: linux/amd64,linux/arm64
   RELEASE_BINARY: '{{.RELEASE_BINARY | default "healthprobe"}}'
   RELEASE_DIST: '{{.RELEASE_DIST | default "dist"}}'
@@ -30,8 +22,7 @@ tasks:
       - python3 .github/scripts/bootstrap.py {{.CLI_ARGS}}
 
   check:
-    # Deliberately not `image` or `vuln-check`: both need the network or a
-    # container runtime and belong in CI, not in a pre-push hook.
+    # Not `image` or `vuln-check`: they need the network or a container runtime, and this runs pre-push.
     desc: Run the fast CI gates (everything except the image build and vuln scan)
     cmds:
       - task: lint:yaml
@@ -47,8 +38,6 @@ tasks:
       - task: deps-check
       - task: size-check
       - task: license-check
-
-  # --- Language-neutral gates ---------------------------------------------
 
   lint:yaml:
     desc: Lint every YAML file
@@ -96,7 +85,7 @@ tasks:
     cmds:
       - |
         base="${BASE}"
-        # No fallback to a fixed window: five checked, "all commits" reported.
+        # No fallback to HEAD~N: it would check a few commits and report all of them as passing.
         if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
           echo "ERROR: base ref '${base}' not found. Fetch it, or run with BASE=<ref>."
           exit 1
@@ -120,10 +109,8 @@ tasks:
     env:
       BASE: '{{.BASE}}'
     cmds:
-      # --no-merges matches the DCO workflow and the dco2 app, both of which
-      # exempt merge commits. The bot exemption they also share has no local
-      # equivalent: it needs the API to tell a real bot account from a git
-      # user.name ending in [bot].
+      # --no-merges matches dco.yml and the dco2 app; their bot exemption needs the API,
+      # so it has no local equivalent.
       - |
         base="${BASE}"
         if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
@@ -141,24 +128,18 @@ tasks:
         done
         echo "All commits have DCO sign-off"
 
-  # --- Go pack -------------------------------------------------------------
-  # Every task below is skipped when there is no go.mod, so the Taskfile keeps
-  # working after the Go pack is deleted. Replace them for another language.
-
   build:
     desc: Build the project
     status: ['! test -f go.mod']
     cmds:
-      # -o bin/ matters: a bare `go build ./...` drops a binary per main
-      # package into the repository root, where `git add -A` picks it up.
+      # Without -o bin/, binaries land in the repo root where `git add -A` picks them up.
       - go build -trimpath -o bin/ ./...
 
   test:
     desc: Run tests with the race detector
     status: ['! test -f go.mod']
     env:
-      # -race needs cgo. Some runner images export CGO_ENABLED=0, and the race
-      # detector then quietly does not run.
+      # -race needs cgo; some runner images export CGO_ENABLED=0.
       CGO_ENABLED: '1'
     cmds:
       - go test -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -168,9 +149,7 @@ tasks:
     desc: Run the Go linter
     status: ['! test -f go.mod']
     cmds:
-      # `go run <module>@<version>` rather than requiring a preinstalled
-      # binary: the version comes from versions.env, so a local run and a CI
-      # run use the same linter and neither has to install anything first.
+      # `go run` at the versions.env pin, not a preinstalled binary, so local and CI match.
       - go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCILINT_VERSION}" run
 
   tidy-check:
@@ -207,8 +186,7 @@ tasks:
     vars:
       PLATFORMS: '{{.PLATFORMS | default .IMAGE_PLATFORMS}}'
     env:
-      # Reached through the environment rather than templated into the script,
-      # so a value containing shell metacharacters cannot alter the command.
+      # Via env, not templated: shell metacharacters in a value would run.
       IMAGE_REF: '{{.IMAGE_REF}}'
       PLATFORMS: '{{.PLATFORMS}}'
     preconditions:
@@ -217,19 +195,13 @@ tasks:
       - sh: command -v jq >/dev/null 2>&1
         msg: jq is required to inspect a published image index
     cmds:
-      # The index buildx reports after a push is what it sent, not what the
-      # registry serves. This reads the index back and fails on a missing,
-      # unexpected or duplicated platform, so a half-pushed release cannot
-      # be signed and announced as multi-arch.
+      # Reads the index back from the registry: buildx reports what it sent, not what
+      # the registry serves, and a half-pushed release must not be signed.
       - cmd: |
           set -euo pipefail
           reference="${IMAGE_REF}"
-          # containerd's platform normalisation, which buildx applies to
-          # --platform before it writes the index: aarch64 and x86_64 are
-          # aliases, a bare arm means arm/v7, and arm64/v8 is arm64. Applied to
-          # both sides, so an index entry that inherited a variant from its base
-          # image, or an alias the build was legitimately asked for, still
-          # matches.
+          # containerd's normalisation, as buildx applies it; used on both sides so aliases
+          # and variants inherited from the base image still match.
           normalize() {
             sed -E \
               -e 's#^linux/(aarch64|arm64)#linux/arm64#' \
@@ -263,12 +235,8 @@ tasks:
             exit 1
           fi
 
-          # Keyed like a buildx platform string, os/arch with the variant when
-          # there is one, so linux/arm/v6 and linux/arm/v7 are two platforms.
-          # buildx records provenance and SBOM attestations as unknown/unknown
-          # entries of the index; they are attachments, not platforms.
-          # Filter the fields, not the joined key, or an attestation carrying a
-          # variant slips through; "" counts as true and "/" + 7 aborts jq.
+          # unknown/unknown entries are buildx attestations. Filter the fields, not the
+          # joined key, or one with a variant slips through; "" is truthy and "/" + 7 aborts jq.
           actual=$(printf '%s' "${raw}" \
             | jq -r '
                 .manifests[]? | .platform // {}
@@ -339,9 +307,8 @@ tasks:
       VULN_DIR: '{{.VULN_DIR | default "vulnerability-check"}}'
     cmds:
       - mkdir -p "{{.VULN_DIR}}"
-      # Findings are a result, not a failure, so the exit code is captured
-      # rather than propagated; `vuln-report:check` turns a scan that could
-      # not produce a usable report into a job failure.
+      # Findings are not a failure: the exit code is recorded, and vuln-report:check
+      # fails only on a scan that produced no usable report.
       - |
         set +e
         go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" -format json ./... \
@@ -349,8 +316,7 @@ tasks:
         echo $? > "{{.VULN_DIR}}/govulncheck.exit"
       - task: vuln-report:render
         vars: {VULN_DIR: '{{.VULN_DIR}}', MODE: full, NAME: report}
-      # The pull request comment lists only what a reviewer can act on. It must
-      # not duplicate the full report in the job summary or its counts.
+      # Flags off so the comment render does not duplicate the full report's summary and counts.
       - task: vuln-report:render
         vars:
           VULN_DIR: '{{.VULN_DIR}}'
@@ -428,15 +394,8 @@ tasks:
     desc: Check dependency licences against the policy
     status: ['! test -f go.mod']
     cmds:
-      # forbidden and restricted are the copyleft classes that would change the
-      # licence of what we ship. unknown is rejected because a licence we could
-      # not classify is not one we can vouch for.
-      #
-      # `reciprocal` is deliberately absent: it covers MPL-2.0, EPL and CDDL,
-      # which are file-level copyleft and safe to depend on. Including it fails
-      # on the first hashicorp dependency, and the adopter deletes the gate.
-      # `permissive` is absent too and should stay that way - upstream defines
-      # it as an empty set, so listing it only looks like policy.
+      # Not `reciprocal`: MPL/EPL/CDDL are file-level copyleft and fine to depend on.
+      # Not `permissive`: upstream defines it as an empty set.
       - go run "github.com/google/go-licenses/v2@${GOLICENSES_VERSION}" check ./... --disallowed_types=forbidden,restricted,unknown --ignore="$(go list -m)"
 
   license-report:
@@ -482,12 +441,7 @@ tasks:
     dir: '{{.RELEASE_DIST}}'
     cmds:
       - |
-        # Written to a temporary file and moved into place: redirecting
-        # straight to checksums.txt creates it before the glob is expanded, so
-        # the file ends up containing the checksum of its own empty self.
-        # A dotfile, so `./*` does not match it, then moved into place.
-        # Redirecting straight to checksums.txt creates the file before the
-        # glob is expanded, and it ends up checksumming its own empty self.
+        # Via a dotfile `./*` skips: redirecting to checksums.txt would checksum its own empty self.
         rm -f checksums.txt
         if command -v sha256sum >/dev/null 2>&1; then
           sha256sum ./* > .checksums.tmp
@@ -504,16 +458,12 @@ tasks:
       GOOS: '{{.GOOS}}'
       GOARCH: '{{.GOARCH}}'
       CGO_ENABLED: '0'
-    # -trimpath and the version stamp keep the build reproducible and make the
-    # binary able to report which release it came from.
     cmd: >-
       go build -trimpath
       -tags "{{.TAGS}}"
       -ldflags="-s -w -X main.version=$(cat version.txt)"
       -o "{{.RELEASE_DIST}}/{{.RELEASE_BINARY}}{{.SUFFIX}}-{{.GOOS}}-{{.GOARCH}}{{.EXT}}"
       "{{.RELEASE_PACKAGE}}"
-
-  # --- Setup ---------------------------------------------------------------
 
   setup:
     desc: Install the pinned tools and the git hooks
@@ -530,8 +480,7 @@ tasks:
       # into the interpreter `python3` resolves to.
       - python3 -c 'import yaml' 2>/dev/null || pip install pyyaml
       - command -v actionlint >/dev/null || brew install actionlint || go install github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION}
-      # The Go tools are not installed: `task lint`, `task license-check` and
-      # `task vuln-check` fetch them at the pinned version with `go run`.
+      # Go tools are deliberately absent: the tasks `go run` them at the pinned version.
 
   clean:
     desc: Remove build output

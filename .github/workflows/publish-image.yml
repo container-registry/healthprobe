@@ -1,12 +1,6 @@
 ---
 name: Publish Image
 
-# What: Builds, pushes, verifies, signs and attests the container image.
-# Fires on: called by release-please.yml after a release is created.
-# Needs: no secrets. The image goes to the `healthprobe` project on 8gears.container-registry.com (8gcr), authenticated keylessly: the job's GitHub OIDC token is the password of the federated Harbor robot `robot_gh-healthprobe-push`, whose claim rules accept only this workflow on main (`job_workflow_ref`). REGISTRY_ADDRESS and REGISTRY_PROJECT repository variables override the target. The tag must belong to a published release whose target is the tagged commit, which is how release-please creates them.
-# Safe to delete if: the project publishes no container image. Remove the caller in release-please.yml too.
-#
-
 on:
   workflow_call:
     inputs:
@@ -20,8 +14,7 @@ on:
         default: ''
         type: string
     outputs:
-      # A reusable workflow only exposes outputs it declares here; job-level
-      # outputs alone are not visible to the caller.
+      # A reusable workflow exposes only outputs declared here, not job-level ones.
       digest:
         description: Digest of the pushed multi-arch image
         value: ${{ jobs.publish.outputs.digest }}
@@ -43,11 +36,7 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       image: ${{ steps.target.outputs.image }}
     steps:
-      # The tag is the only input that decides what ships, so it is resolved
-      # to a commit here and the checkout uses that commit. A tag moved after
-      # the release was created cannot change what is built, and a dispatch
-      # with a typo, an unknown tag or a draft release fails here instead of
-      # publishing. Annotated tags are dereferenced to the commit they point at.
+      # Checkout uses the commit resolved here, so moving the tag after release cannot change what ships.
       - name: Resolve and validate the release tag
         id: release
         env:
@@ -60,10 +49,8 @@ jobs:
             echo "::error::tag_name must match vX.Y.Z, got '${TAG_NAME}'"
             exit 1
           fi
-          # Each call is captured and checked rather than read from a process
-          # substitution: errexit ignores what a process substitution exits
-          # with, and gh prints its error body on stdout, so a 404 otherwise
-          # lands in the variables and is reported as a target mismatch.
+          # Captured and checked, not process-substituted: errexit ignores those, and gh prints
+          # error bodies on stdout, so a 404 would be reported as a target mismatch.
           if ! ref=$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG_NAME}" --jq '"\(.object.type) \(.object.sha)"'); then
             echo "::error::${TAG_NAME} is not a tag in ${GH_REPO}"
             exit 1
@@ -110,8 +97,6 @@ jobs:
       - name: Resolve image name
         id: target
         env:
-          # Interpolated through the environment rather than inline, so a value
-          # containing shell metacharacters cannot alter the command.
           OVERRIDE: ${{ inputs.image }}
           DEFAULT: ${{ vars.REGISTRY_ADDRESS || '8gears.container-registry.com' }}/${{ vars.REGISTRY_PROJECT || 'healthprobe' }}/${{ github.event.repository.name }}
         run: |
@@ -157,8 +142,6 @@ jobs:
           provenance: false  # replaced by the attestation below
           sbom: false        # replaced by the syft attestation below
 
-      # Reads the index back from the registry and fails on a missing,
-      # unexpected or duplicated platform, before anything is signed.
       # PLATFORMS is unset on purpose: the assertion must come from the Taskfile.
       - name: Verify the published platforms
         env:
@@ -171,8 +154,7 @@ jobs:
       - name: Install syft
         uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
 
-      # Sign and attest by digest, never by tag: a tag can be repointed at a
-      # different image after the signature is made.
+      # By digest, never by tag: a tag can be repointed after signing.
       - name: Sign the image
         env:
           IMAGE_REF: ${{ steps.target.outputs.image }}@${{ steps.build.outputs.digest }}

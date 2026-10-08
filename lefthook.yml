@@ -1,7 +1,3 @@
-# Local git hooks. These mirror the cheap half of the CI gates so a mistake is
-# caught before it costs a CI round trip. Install with `task setup`.
-# Skip once with `LEFTHOOK=0 git commit ...`.
-
 pre-commit:
   parallel: true
   commands:
@@ -12,8 +8,6 @@ pre-commit:
       glob: ".github/workflows/*.{yml,yaml}"
       run: actionlint {staged_files}
     repo-lint:
-      # Cheap, and it is what catches a dangling doc reference or a label the
-      # labeler emits but settings.yml does not declare.
       glob: "*.{md,yml,yaml,json}"
       run: python3 .github/scripts/repo-lint.py
 

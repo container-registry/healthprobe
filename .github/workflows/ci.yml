@@ -1,16 +1,6 @@
 ---
 name: CI
 
-# What: Builds, tests, lints and vulnerability-scans the Go pack.
-# Fires on: pull request and push to main (skipping docs-only changes). vuln-check
-#   also runs weekly, because new advisories land against unchanged code.
-# Needs: nothing. Uses GITHUB_TOKEN only.
-# Safe to delete if: the project is not Go. It also no-ops on its own without go.mod.
-#
-# Build and test gates for the Go pack. Delete this workflow along with
-# go.mod, main.go and the Go tasks if the project is not Go; the language
-# neutral gates live in hygiene.yml and keep working either way.
-
 on:
   pull_request:
     paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'NOTICE']
@@ -18,15 +8,12 @@ on:
     branches: [main]
     paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'NOTICE']
   schedule:
-    # govulncheck reports newly published advisories against unchanged code,
-    # so it needs to run on a clock rather than only on a push.
     - cron: '0 6 * * 1'
 
 permissions: {}
 
 concurrency:
-  # The event name is part of the group so a scheduled run cannot cancel a
-  # push run that happens to share a ref.
+  # event_name keeps a scheduled run from cancelling a push run on the same ref.
   group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
@@ -43,9 +30,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
-      # resolves against GITHUB_WORKSPACE, which does not exist when a
-      # job-level condition is evaluated, so that guard always fails open.
+      # Not a job-level hashFiles() guard: GITHUB_WORKSPACE does not exist yet there, so it fails open.
       - id: detect
         run: |
           if [ -f go.mod ]; then
@@ -78,9 +63,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
-      # resolves against GITHUB_WORKSPACE, which does not exist when a
-      # job-level condition is evaluated, so that guard always fails open.
+      # Not a job-level hashFiles() guard: GITHUB_WORKSPACE does not exist yet there, so it fails open.
       - id: detect
         run: |
           if [ -f go.mod ]; then
@@ -107,9 +90,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
-      # resolves against GITHUB_WORKSPACE, which does not exist when a
-      # job-level condition is evaluated, so that guard always fails open.
+      # Not a job-level hashFiles() guard: GITHUB_WORKSPACE does not exist yet there, so it fails open.
       - id: detect
         run: |
           if [ -f go.mod ]; then
@@ -136,9 +117,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
-      # resolves against GITHUB_WORKSPACE, which does not exist when a
-      # job-level condition is evaluated, so that guard always fails open.
+      # Not a job-level hashFiles() guard: GITHUB_WORKSPACE does not exist yet there, so it fails open.
       - id: detect
         run: |
           if [ -f go.mod ]; then
@@ -153,8 +132,6 @@ jobs:
       - if: steps.detect.outputs.go == 'true'
         run: task license-check
       - name: License report
-        # always(), so a failing licence check still produces the report - but
-        # only when the Go pack is present, or there is no `task` to run.
         if: always() && steps.detect.outputs.go == 'true'
         run: task license-report
 
@@ -162,8 +139,7 @@ jobs:
     name: Vulnerability Check
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # pull-requests: write is used only by the sticky-comment step. It covers
-    # issue comments on pull requests, so issues: write is not needed.
+    # pull-requests: write covers comments on PRs; issues: write is not needed.
     permissions:
       contents: read
       pull-requests: write
@@ -172,9 +148,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
-      # resolves against GITHUB_WORKSPACE, which does not exist when a
-      # job-level condition is evaluated, so that guard always fails open.
+      # Not a job-level hashFiles() guard: GITHUB_WORKSPACE does not exist yet there, so it fails open.
       - id: detect
         run: |
           if [ -f go.mod ]; then
@@ -187,22 +161,14 @@ jobs:
       - uses: ./.github/actions/setup
         if: steps.detect.outputs.go == 'true'
 
-      # Findings are a result, not a scan failure: the task captures the
-      # govulncheck exit code instead of propagating it and exposes the counts
-      # as step outputs. "Enforce scanner health" below turns a broken scan
-      # into a job failure. Unfixable advisories therefore no longer keep
-      # every pull request and the weekly run red.
+      # Findings do not fail the job, so unfixable advisories cannot keep every run red; only a broken scan does.
       - name: Run govulncheck and render reports
         id: report
         if: steps.detect.outputs.go == 'true'
         run: task vuln-report
 
-      # Fork pull requests get a read-only token, so commenting would only
-      # produce a confusing failure. A scan that produced no usable report
-      # counts zero fixable findings, which would delete a comment that is
-      # still accurate, so that case is skipped too.
-      # Deliberately not split into a job that runs no pull-request code: the step
-      # runs only for same-repo pull requests, and it needs the reports this job produced.
+      # A failed scan counts zero findings and would delete an accurate comment. Not split into a
+      # job without PR code: it runs only for same-repo PRs and needs this job's reports.
       - name: Update pull request comment
         if: >-
           steps.detect.outputs.go == 'true' &&
@@ -238,9 +204,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
-      # resolves against GITHUB_WORKSPACE, which does not exist when a
-      # job-level condition is evaluated, so that guard always fails open.
+      # Not a job-level hashFiles() guard: GITHUB_WORKSPACE does not exist yet there, so it fails open.
       - id: detect
         run: |
           if [ -f go.mod ]; then
@@ -278,8 +242,6 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
         if: steps.detect.outputs.docker == 'true'
 
-      # Build both platforms so a cross-compilation break is caught here, and
-      # load the native one so it can actually be run.
       - name: Build both platforms
         if: steps.detect.outputs.docker == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0

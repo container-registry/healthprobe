@@ -1,7 +1,7 @@
 # Repository Automation
 
-What each piece of automation does, what it needs, and when it is safe to remove. Every workflow repeats the
-short version of this in a header comment; this is the map.
+What each piece of automation does, what it needs, and when it is safe to remove. Workflows carry no header
+comments; this is the map.
 
 ## Workflows
 

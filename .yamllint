@@ -1,8 +1,4 @@
 ---
-# Deliberately lenient. The job of this linter here is to catch YAML that is
-# wrong, not YAML that is styled differently: workflow files are wide, GitHub
-# requires the `on:` key that yamllint reads as the boolean `true`, and
-# generated files should not be reformatted by hand.
 extends: default
 
 ignore: |
@@ -10,9 +6,7 @@ ignore: |
   dist/
   .task/
   vendor/
-  # Go template syntax is not valid YAML. Everything else under deploy/chart,
-  # values, Chart.yaml and the ci/ scenarios, is linted here and again by
-  # `ct lint` with chart-testing's own config.
+  # Go template syntax is not valid YAML.
   /deploy/chart/templates/
   /deploy/chart/tests/__snapshot__/
 
@@ -23,10 +17,8 @@ rules:
   truthy:
     allowed-values: ['true', 'false']
     check-keys: false
-  # Pure style, and GitHub's own workflow docs do not use it.
   document-start: disable
-  # release-please's helm updater re-emits the appVersion line of Chart.yaml
-  # with a single space before its `# x-release-please-version` marker.
+  # release-please re-emits Chart.yaml's appVersion with one space before its marker.
   comments:
     min-spaces-from-content: 1
   braces:

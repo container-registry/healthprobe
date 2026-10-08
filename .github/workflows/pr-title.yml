@@ -1,19 +1,8 @@
 ---
 name: PR Title
 
-# What: Requires the pull request title to be a conventional commit.
-# Fires on: pull request opened, edited or synchronized.
-# Needs: nothing.
-# Safe to delete if: never, while release-please is in use. The title becomes the squash commit it parses.
-#
-# DO NOT ADD actions/checkout TO THIS WORKFLOW.
-#
-# pull_request_target, not pull_request: with pull_request, a pull request that
-# edits this file runs its own edited copy, so the check it is supposed to pass
-# can be replaced with one that always succeeds. pull_request_target runs the
-# definition from the base branch instead. The action reads the title from the
-# event payload and never needs the code, so the usual danger of this trigger
-# does not apply here as long as nothing checks out the head.
+# DO NOT ADD actions/checkout. pull_request_target so a PR cannot run its own edited copy
+# of this check; the title comes from the event payload, so no checkout is ever needed.
 on:  # zizmor: ignore[dangerous-triggers]
   pull_request_target:
     types: [opened, edited, synchronize]

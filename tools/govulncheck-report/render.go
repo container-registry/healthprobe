@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-// marker identifies the sticky pull request comment so re-runs update the
-// existing comment instead of stacking new ones.
+// Must match MARKER in .github/scripts/vulnerability-comment.sh.
 const marker = "<!-- govulncheck-report -->"
 
 const (
@@ -14,9 +13,6 @@ const (
 	modeFixable = "fixable"
 )
 
-// renderMarkdown builds the report body. In fixable mode only findings with a
-// known fixed version are listed, because those are the ones a reviewer can act
-// on inside the pull request.
 func renderMarkdown(summary Summary, mode string, scannerStderr string, maxRows int) string {
 	shown := summary.Findings
 	if mode == modeFixable {

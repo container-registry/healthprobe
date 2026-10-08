@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""Repository consistency checks.
-
-Every check here exists because the corresponding mistake actually shipped in
-this template at some point. They are cheap, dependency-free, and run both in
-CI (hygiene.yml) and locally (`task lint:repo`).
-
-A project that adopts the template can delete any individual check function and
-its entry in CHECKS; nothing else depends on them.
-"""
-
 from __future__ import annotations
 
 import json
@@ -19,10 +9,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-# Files that would legitimately still contain placeholder markers after
-# adoption because they document the mechanism itself. Empty on purpose:
-# bootstrap deletes CHECKLIST.md, and nothing else explains placeholders in
-# prose any more. Add a path here only with a reason.
+# Empty on purpose: bootstrap deletes CHECKLIST.md, the only doc that explained placeholders.
 PLACEHOLDER_DOCS: set[str] = set()
 
 PLACEHOLDER_RE = re.compile(r"\{\{[A-Z][A-Z0-9_]*\}\}")
@@ -48,11 +35,7 @@ def _rel(path: pathlib.Path) -> str:
 
 
 def check_yaml_loads(errors: list[str]) -> None:
-    """Every YAML file must fully construct, not merely tokenize.
-
-    yamllint parses the event stream and accepts things PyYAML cannot build.
-    it lints clean and GitHub then rejects the file.
-    """
+    """yamllint accepts YAML that PyYAML cannot construct, and GitHub then rejects it."""
     try:
         import yaml
     except ImportError:
@@ -60,8 +43,7 @@ def check_yaml_loads(errors: list[str]) -> None:
         return
 
     for path in _files(".yml", ".yaml"):
-        # Helm templates are Go templates that only become YAML when rendered;
-        # chart-ci.yml renders and lints them.
+        # Go templates, not YAML until rendered; chart-ci.yml lints them.
         if path.is_relative_to(ROOT / "deploy/chart/templates"):
             continue
         try:
@@ -72,8 +54,7 @@ def check_yaml_loads(errors: list[str]) -> None:
 
 def check_json_loads(errors: list[str]) -> None:
     for path in _files(".json"):
-        # Test fixtures are allowed to be malformed on purpose, and a
-        # govulncheck fixture is a stream of documents, not one document.
+        # Fixtures may be malformed on purpose, and govulncheck fixtures are JSON streams.
         if "lock" in path.name or "testdata" in path.parts:
             continue
         try:
@@ -83,12 +64,7 @@ def check_json_loads(errors: list[str]) -> None:
 
 
 def check_labeler_labels_declared(errors: list[str]) -> None:
-    """Labels applied by the labeler must exist in settings.yml.
-
-    actions/labeler with sync-labels creates missing labels with a random
-    colour and no description, so the drift shows up as cosmetic noise rather
-    than a failure.
-    """
+    """actions/labeler silently creates undeclared labels with a random colour and no description."""
     import yaml
 
     labeler = ROOT / ".github/labeler.yml"
@@ -100,8 +76,6 @@ def check_labeler_labels_declared(errors: list[str]) -> None:
 
     sources = {".github/labeler.yml": set(yaml.safe_load(labeler.read_text(encoding="utf-8")) or {})}
 
-    # Issue forms apply labels on submission and drift from settings.yml the
-    # same way the labeler does.
     for form in sorted((ROOT / ".github/ISSUE_TEMPLATE").glob("*.y*ml")):
         if form.name == "config.yml":
             continue
@@ -138,7 +112,6 @@ def check_release_please_packages_exist(errors: list[str]) -> None:
 
 
 def check_version_file_matches_manifest(errors: list[str]) -> None:
-    """With release-type `simple`, version.txt and the manifest must agree."""
     config = ROOT / ".release-please/config-app.json"
     manifest = ROOT / ".release-please/manifest-app.json"
     version = ROOT / "version.txt"
@@ -154,13 +127,7 @@ def check_version_file_matches_manifest(errors: list[str]) -> None:
 
 
 def check_referenced_paths_exist(errors: list[str]) -> None:
-    """Markdown must not advertise files the repository does not ship.
-
-    Only two contexts are treated as a claim that a file exists: a relative
-    markdown link, and a backticked path inside a table row. Prose such as
-    "consider adding `.github/FUNDING.yml`" is intentionally ignored, because
-    listing an optional extra is not the same as promising it is there.
-    """
+    """Only links and table-row paths claim a file exists; prose may name optional extras."""
     link = re.compile(r"\]\(([^)#:]+?)\)")
     cell = re.compile(r"`([^`\s]+?\.[A-Za-z0-9]+)`")
     owned = {".github", "docs", "scripts", "packs", "optional", "taskfile", "test", "tests"}
@@ -173,20 +140,16 @@ def check_referenced_paths_exist(errors: list[str]) -> None:
             return
         if pathlib.PurePath(ref).suffix not in KNOWN_SUFFIXES:
             return
-        # A link resolves relative to the file that contains it; a path written
-        # in a table is usually relative to the repository root. Accept either.
+        # Links resolve relative to the file, table paths usually to the root.
         if (path.parent / ref).exists() or (ROOT / ref).exists():
             return
         errors.append(f"{_rel(path)}: references {ref!r}, which does not exist")
 
     for path in _files(".md"):
         for line in path.read_text(encoding="utf-8").splitlines():
-            # A markdown link is unambiguous: it resolves relative to the file.
             for match in link.finditer(line):
                 flag(path, match.group(1))
-            # In a table, only a ref carrying a directory is a claim about a
-            # concrete path. A bare `config.yml` is relative to whatever the
-            # surrounding section heading was.
+            # A bare `config.yml` is relative to the section heading, so require a directory.
             if line.lstrip().startswith("|"):
                 for match in cell.finditer(line):
                     if "/" in match.group(1) and match.group(1).split("/", 1)[0] in owned:
@@ -194,11 +157,6 @@ def check_referenced_paths_exist(errors: list[str]) -> None:
 
 
 def check_local_workflow_calls_resolve(errors: list[str]) -> None:
-    """A `uses: ./.github/workflows/x.yml` must point at a file that exists.
-
-    Removing an optional pack used to leave the caller behind, which takes the
-    whole calling workflow down rather than just the removed job.
-    """
     workflows = ROOT / ".github/workflows"
     if not workflows.is_dir():
         return
@@ -208,7 +166,6 @@ def check_local_workflow_calls_resolve(errors: list[str]) -> None:
         for match in local.finditer(path.read_text(encoding="utf-8")):
             ref = match.group(1)[2:]
             target = ROOT / ref
-            # A composite action is referenced by its directory.
             is_action_dir = target.is_dir() and any(
                 (target / name).is_file() for name in ("action.yml", "action.yaml")
             )
@@ -222,13 +179,9 @@ USES_RE = re.compile(r"^\s*(?:-\s+)?uses:\s*(?P<ref>\S+)(?:\s*#\s*(?P<comment>.*
 
 
 def check_action_pins_agree(errors: list[str]) -> None:
-    """One action repository must be pinned at one SHA everywhere.
+    """lint:pins checks each `uses:` alone, so a stale branch can reintroduce an old SHA.
 
-    `task lint:pins` judges each `uses:` on its own, so a branch that predates a
-    Dependabot bump reintroduces the old SHA and merges clean. That is how
-    github/codeql-action came to ship at two SHAs here at once. Subpaths of one
-    repository are one release, so the grouping key is owner/repo rather than
-    the full path.
+    Grouped by owner/repo because subpaths of one repository are one release.
     """
     seen: dict[str, dict[tuple[str, str], list[str]]] = {}
 
@@ -265,11 +218,7 @@ def check_action_pins_agree(errors: list[str]) -> None:
 
 
 def check_issue_template_config(errors: list[str]) -> None:
-    """Every contact link needs name, url and about.
-
-    Removing an optional URL used to leave the surrounding entry behind, and
-    GitHub rejects the whole chooser rather than just that link.
-    """
+    """One incomplete contact link makes GitHub reject the whole issue chooser."""
     import yaml
 
     config = ROOT / ".github/ISSUE_TEMPLATE/config.yml"
@@ -287,12 +236,7 @@ def check_issue_template_config(errors: list[str]) -> None:
 
 
 def check_pr_target_never_checks_out(errors: list[str]) -> None:
-    """A pull_request_target workflow must not check out the pull request.
-
-    pull_request_target runs in the base repository's context with a writable
-    token. Checking out the head there executes a fork's code with that token.
-    The workflows carry a comment saying so; this is what enforces it.
-    """
+    """pull_request_target has a writable token; checking out the PR runs fork code with it."""
     import yaml
 
     workflows = ROOT / ".github/workflows"
@@ -305,9 +249,8 @@ def check_pr_target_never_checks_out(errors: list[str]) -> None:
         except Exception:
             continue  # check_yaml_loads already reported it
 
-        # PyYAML reads the unquoted key `on` as the boolean True. The value
-        # may be a mapping, a sequence, or a bare string, and the guard has to
-        # recognise all three or it silently passes the workflow.
+        # PyYAML reads unquoted `on` as True. Handle mapping, list and string forms,
+        # or the workflow silently passes.
         triggers = doc.get("on", doc.get(True))
         if isinstance(triggers, dict):
             names = set(triggers)
@@ -330,8 +273,7 @@ def check_pr_target_never_checks_out(errors: list[str]) -> None:
                     )
 
 
-# Markers bootstrap is supposed to consume. Written as split literals so this
-# file never matches its own patterns.
+# The \s* in each pattern keeps this file from matching itself.
 MARKER_RES = (
     re.compile(r"<!--\s*template-only:(?:start|end)\s*-->"),
     re.compile(r"<!--\s*(?:if:[A-Z_]+|endif)\s*-->"),
@@ -339,7 +281,6 @@ MARKER_RES = (
 )
 
 
-# Leading bytes of the executable formats a build is likely to leave behind.
 BINARY_MAGIC = (
     b"\x7fELF",          # ELF
     b"\xfe\xed\xfa\xce",  # Mach-O 32
@@ -352,11 +293,7 @@ BINARY_MAGIC = (
 
 
 def check_base_image_pin_matches(errors: list[str]) -> None:
-    """The Dockerfile ARG defaults must match versions.env.
-
-    Two copies of the same pin drift, and the one Renovate updates is not
-    necessarily the one the build uses.
-    """
+    """The copy Renovate updates is not necessarily the one the build uses."""
     env_file = ROOT / "versions.env"
     dockerfile = ROOT / "Dockerfile"
     if not (env_file.exists() and dockerfile.exists()):
@@ -383,12 +320,6 @@ def check_base_image_pin_matches(errors: list[str]) -> None:
 
 
 def check_no_committed_binaries(errors: list[str]) -> None:
-    """No compiled executable may be tracked.
-
-    `go build ./...` writes a binary named after the package directory into the
-    working directory, and `git add -A` then commits it. It happened in this
-    repository, and a template that ships one hands it to every adopter.
-    """
     try:
         tracked = subprocess.run(
             ["git", "-C", str(ROOT), "ls-files", "-z"],
@@ -412,16 +343,10 @@ def check_no_committed_binaries(errors: list[str]) -> None:
 
 
 def check_bootstrap_left_nothing_behind(errors: list[str]) -> None:
-    """After bootstrap, no placeholder and no bootstrap marker may survive.
-
-    In the template repository itself everything still holds placeholders, so
-    the check is a no-op until the CHECKLIST.md marker file is gone.
-    """
     if (ROOT / "CHECKLIST.md").exists():
         return  # still an unadopted template
 
-    # The same set bootstrap rewrites. Scanning less means a malformed adopted
-    # repository passes validation.
+    # Must cover every file bootstrap rewrites.
     extra = {"Dockerfile", "LICENSE", "NOTICE", "CODEOWNERS", "go.mod", ".gitignore"}
     candidates = [
         path for path in _files()
