@@ -44,7 +44,7 @@ this in header comments; this is the map.
 
 ## Image registry
 
-Images go to Harbor at `8gears.container-registry.com` (8gcr), never to GHCR. Both projects are public.
+Images go to Harbor at `8gears.container-registry.com` (8gcr), never to GHCR. `healthprobe` is public; `8gcr-dev` is private, so pulling a preview needs a login.
 
 | What | Where | Pushed by |
 |------|-------|-----------|
