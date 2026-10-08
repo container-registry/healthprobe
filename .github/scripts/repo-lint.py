@@ -273,7 +273,6 @@ def check_pr_target_never_checks_out(errors: list[str]) -> None:
                     )
 
 
-# The \s* in each pattern keeps this file from matching itself.
 MARKER_RES = (
     re.compile(r"<!--\s*template-only:(?:start|end)\s*-->"),
     re.compile(r"<!--\s*(?:if:[A-Z_]+|endif)\s*-->"),

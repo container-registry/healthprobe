@@ -208,7 +208,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Both filled and blank: rehearsing only blank once shipped leftover marker comments.
+          # Rehearse filled and blank: leftover marker comments shipped once when only blank was rehearsed.
           rehearse() {
             lang="$1"
             chart="$2"
