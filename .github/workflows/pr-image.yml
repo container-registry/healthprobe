@@ -3,7 +3,7 @@ name: PR Preview Image
 
 # What: Builds, pushes and signs a preview image for a pull request, tagged pr-<N>, and comments the reference on it.
 # Fires on: pull requests against main whose cumulative diff touches an image input; in a native GitHub stack, only the top pull request.
-# Needs: no secrets. Previews go to the private `8gcr-dev` project on 8gears.container-registry.com, pushed by the federated Harbor robot `robot_gh-healthprobe-push` with the job's GitHub OIDC token. REGISTRY_ADDRESS and PR_REGISTRY_PROJECT repository variables override the target. Fork and Dependabot pull requests get no OIDC token, so they build no preview.
+# Needs: no secrets. Previews go to the public `8gcr-dev` project on 8gears.container-registry.com, pushed by the federated Harbor robot `robot_gh-healthprobe-preview` with the job's GitHub OIDC token. REGISTRY_ADDRESS and PR_REGISTRY_PROJECT repository variables override the target. Fork and Dependabot pull requests get no OIDC token, so they build no preview.
 # Safe to delete if: the project publishes no container image, or reviewers do not need one before merge.
 #
 # Self-contained on purpose: publish-image.yml only accepts a published
@@ -108,7 +108,7 @@ jobs:
     if: >-
       needs.changes.outputs.build == 'true' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'dependabot[bot]'
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

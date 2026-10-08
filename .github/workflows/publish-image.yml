@@ -3,7 +3,7 @@ name: Publish Image
 
 # What: Builds, pushes, verifies, signs and attests the container image.
 # Fires on: called by release-please.yml after a release is created.
-# Needs: no secrets. The image goes to the `healthprobe` project on 8gears.container-registry.com (8gcr), authenticated keylessly: the job's GitHub OIDC token is the password of the federated Harbor robot `robot_gh-healthprobe-push`, whose claim rule accepts only `repository == container-registry/healthprobe`. REGISTRY_ADDRESS and REGISTRY_PROJECT repository variables override the target. The tag must belong to a published release whose target is the tagged commit, which is how release-please creates them.
+# Needs: no secrets. The image goes to the `healthprobe` project on 8gears.container-registry.com (8gcr), authenticated keylessly: the job's GitHub OIDC token is the password of the federated Harbor robot `robot_gh-healthprobe-push`, whose claim rules accept only this workflow on main (`job_workflow_ref`). REGISTRY_ADDRESS and REGISTRY_PROJECT repository variables override the target. The tag must belong to a published release whose target is the tagged commit, which is how release-please creates them.
 # Safe to delete if: the project publishes no container image. Remove the caller in release-please.yml too.
 #
 
