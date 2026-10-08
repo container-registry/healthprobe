@@ -1,0 +1,142 @@
+---
+name: Release Assets
+
+# What: Builds, attests and uploads the release binaries and their SBOM.
+# Fires on: called by release-please.yml after a release is created.
+# Needs: nothing. The tag must belong to a published release whose target is the tagged commit, which is how release-please creates them.
+# Safe to delete if: the project publishes no binaries. It also no-ops on its own without go.mod; remove the caller in release-please.yml if deleted.
+#
+# Called by release-please.yml once a release exists. It is not triggered by
+# `release: published`, because a release created with GITHUB_TOKEN does not
+# fire workflow events - that is why the previous version never ran.
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        description: Existing GitHub Release tag to upload assets to
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing GitHub Release tag to upload assets to
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      # Build provenance is signed with a short-lived OIDC identity, so there
+      # is no key to store or rotate.
+      id-token: write
+      attestations: write
+    steps:
+      # The tag is the only input that decides what ships, so it is resolved
+      # to a commit here and the checkout uses that commit. A tag moved after
+      # the release was created cannot change what is built, and a dispatch
+      # with a typo, an unknown tag or a draft release fails here instead of
+      # publishing. Annotated tags are dereferenced to the commit they point at.
+      - name: Resolve and validate the release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${TAG_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag_name must match vX.Y.Z, got '${TAG_NAME}'"
+            exit 1
+          fi
+          # Each call is captured and checked rather than read from a process
+          # substitution: errexit ignores what a process substitution exits
+          # with, and gh prints its error body on stdout, so a 404 otherwise
+          # lands in the variables and is reported as a target mismatch.
+          if ! ref=$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG_NAME}" --jq '"\(.object.type) \(.object.sha)"'); then
+            echo "::error::${TAG_NAME} is not a tag in ${GH_REPO}"
+            exit 1
+          fi
+          read -r type sha <<<"${ref}"
+          if [ "${type}" = "tag" ]; then
+            if ! sha=$(gh api "repos/${GH_REPO}/git/tags/${sha}" --jq '.object.sha'); then
+              echo "::error::cannot dereference the annotated tag ${TAG_NAME} in ${GH_REPO}"
+              exit 1
+            fi
+          fi
+          if ! release=$(gh api "repos/${GH_REPO}/releases/tags/${TAG_NAME}" --jq '"\(.draft) \(.target_commitish)"'); then
+            echo "::error::${TAG_NAME} has no GitHub release. release-please creates one when the release pull request is merged."
+            exit 1
+          fi
+          read -r draft target <<<"${release}"
+          if [ "${draft}" != "false" ] || [ "${target}" != "${sha}" ]; then
+            echo "::error::${TAG_NAME} must be a published release whose target is ${sha} (draft=${draft}, target=${target}). release-please creates releases that way; a release made by hand does not qualify."
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+          persist-credentials: false
+
+
+      # In-job detection, not a job-level `if: hashFiles(...)`: hashFiles
+      # resolves against GITHUB_WORKSPACE, which does not exist when a
+      # job-level condition is evaluated, so that guard always fails open.
+      - id: detect
+        run: |
+          if [ -f go.mod ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "No go.mod; the Go pack has been removed. Skipping." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: ./.github/actions/setup
+        if: steps.detect.outputs.go == 'true'
+
+      # Build commands live in Taskfile.yml so they can be run locally.
+      - name: Build release assets
+        if: steps.detect.outputs.go == 'true'
+        run: task release-assets
+
+      # An SBOM of the built artifacts, not of the checkout. Binaries are
+      # what people download, and a repository-level inventory does not
+      # describe them.
+      - name: Generate SBOM
+        if: steps.detect.outputs.go == 'true'
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      # After the SBOM, so every published file is covered by checksums.txt.
+      - name: Checksum every artifact
+        if: steps.detect.outputs.go == 'true'
+        run: task release-checksums
+
+      - name: Attest build provenance
+        if: steps.detect.outputs.go == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: |
+            dist/app-*
+            dist/sbom.spdx.json
+
+      # gh ships on the runner, so this needs no third-party action in a job
+      # that holds contents: write.
+      - name: Upload release assets
+        if: steps.detect.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber

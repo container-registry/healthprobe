@@ -1,0 +1,79 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "pull-request-header": "App release. Merging tags `vX.Y.Z` and publishes the image and binaries.",
+  "pull-request-footer": "Squash-merge to release. See [docs/RELEASES.md](https://github.com/container-registry/oss-project-template/blob/main/docs/RELEASES.md).",
+  "pull-request-title-pattern": "chore: release app ${version}",
+  "release-type": "simple",
+  "initial-version": "0.1.0",
+  "always-update": true,
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "exclude-paths": [
+    "docs",
+    ".github",
+    ".release-please",
+    "deploy",
+    "taskfile"
+  ],
+  "packages": {
+    ".": {
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "deploy/chart/Chart.yaml"
+        }
+      ]
+    }
+  },
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes"
+    },
+    {
+      "type": "perf",
+      "section": "Performance Improvements"
+    },
+    {
+      "type": "revert",
+      "section": "Reverts"
+    },
+    {
+      "type": "docs",
+      "section": "Documentation"
+    },
+    {
+      "type": "refactor",
+      "section": "Code Refactoring"
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "style",
+      "section": "Styles",
+      "hidden": true
+    },
+    {
+      "type": "chore",
+      "section": "Miscellaneous",
+      "hidden": true
+    },
+    {
+      "type": "build",
+      "section": "Build System",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "CI/CD",
+      "hidden": true
+    }
+  ]
+}

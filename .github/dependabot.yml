@@ -1,0 +1,57 @@
+---
+# GitHub-native, no app to install. Its main job here is keeping the action
+# SHA pins current: pinning without an updater just means pinning to something
+# old, and Dependabot rewrites the SHA and the version comment together.
+#
+# versions.env is the one thing Dependabot cannot read. optional/renovate.json
+# covers it, either as a replacement for this file or beside it with Renovate
+# limited to the versions.env manager. That file explains both; do not run the
+# two on the same ecosystem.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      # Do not propose a version published in the last week. A compromised
+      # release is usually yanked well inside that window.
+      default-days: 7
+    labels: [dependencies, component/ci]
+    commit-message:
+      prefix: ci
+    # One pull request per week for every action bump: they are reviewed the
+    # same way (SHA, tag comment, changelog) and land as one ci: commit.
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      # Do not propose a version published in the last week. A compromised
+      # release is usually yanked well inside that window.
+      default-days: 7
+    labels: [dependencies]
+    commit-message:
+      prefix: fix
+      prefix-development: chore
+    groups:
+      # One pull request for the routine bumps; majors stay separate so they
+      # get read.
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      # Do not propose a version published in the last week. A compromised
+      # release is usually yanked well inside that window.
+      default-days: 7
+    labels: [dependencies]
+    commit-message:
+      prefix: build
