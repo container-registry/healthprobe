@@ -10,6 +10,9 @@ set -euo pipefail
 CLUSTER="${CLUSTER:-healthprobe-e2e}"
 CTX="kind-${CLUSTER}"
 IMAGE=localhost/healthprobe-e2e:healthy
+# Pod names and the cleanup selector carry a per-run suffix, so a run against a
+# reused cluster never collides with, or deletes, anything it did not create.
+RUN="r$$"
 cd "$(dirname "$0")/../.."
 
 # kind writes its context into KUBECONFIG and makes it current, and deleting
@@ -48,8 +51,8 @@ pod() {
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ${name}
-  labels: {app: healthprobe-e2e}
+  name: ${name}-${RUN}
+  labels: {app: healthprobe-e2e, healthprobe-e2e/run: ${RUN}}
 spec:
   securityContext: {runAsNonRoot: true, runAsUser: 65532}
   containers:
@@ -77,27 +80,27 @@ EOF
 
 failed=0
 for p in ready-http ready-tls ready-notls; do
-  if kubectl --context "$CTX" wait --for=condition=Ready "pod/$p" --timeout=90s >/dev/null; then
+  if kubectl --context "$CTX" wait --for=condition=Ready "pod/${p}-${RUN}" --timeout=90s >/dev/null; then
     echo "ok   kind ${p}: Ready"
   else
     echo "FAIL kind ${p}: not Ready"
-    kubectl --context "$CTX" describe "pod/$p" | tail -20
+    kubectl --context "$CTX" describe "pod/${p}-${RUN}" | tail -20
     failed=1
   fi
 done
 
 # Not-ready is only meaningful once the container runs and the probe has
 # failed a few times, so wait for the failure event rather than a fixed sleep.
-kubectl --context "$CTX" wait --for=jsonpath='{.status.containerStatuses[0].started}'=true pod/not-ready --timeout=90s >/dev/null
+kubectl --context "$CTX" wait --for=jsonpath='{.status.containerStatuses[0].started}'=true "pod/not-ready-${RUN}" --timeout=90s >/dev/null
 event=""
 for _ in $(seq 30); do
-  event=$(kubectl --context "$CTX" get events --field-selector involvedObject.name=not-ready,reason=Unhealthy \
+  event=$(kubectl --context "$CTX" get events --field-selector "involvedObject.name=not-ready-${RUN},reason=Unhealthy" \
     -o jsonpath='{.items[0].message}' 2>/dev/null || true)
   [ -n "$event" ] && break
   sleep 2
 done
-ready=$(kubectl --context "$CTX" get pod not-ready -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
-restarts=$(kubectl --context "$CTX" get pod not-ready -o jsonpath='{.status.containerStatuses[0].restartCount}')
+ready=$(kubectl --context "$CTX" get pod "not-ready-${RUN}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+restarts=$(kubectl --context "$CTX" get pod "not-ready-${RUN}" -o jsonpath='{.status.containerStatuses[0].restartCount}')
 if [ "$ready" = "False" ] && [[ "$event" == *503* ]] && [ "$restarts" = 0 ]; then
   echo "ok   kind not-ready: Ready=False, liveness kept it running, event: ${event}"
 else
@@ -105,5 +108,5 @@ else
   failed=1
 fi
 
-kubectl --context "$CTX" delete pod -l app=healthprobe-e2e --wait=false >/dev/null
+kubectl --context "$CTX" delete pod -l "healthprobe-e2e/run=${RUN}" --wait=false >/dev/null
 exit "$failed"

@@ -202,7 +202,7 @@ func probe(cfg config, stderr io.Writer) error {
 		return fmt.Errorf("sending request: %w", err)
 	}
 
-	code, line, err := readStatus(bufio.NewReaderSize(conn, maxStatusLine))
+	code, line, err := readFinalStatus(bufio.NewReaderSize(conn, maxStatusLine))
 	if err != nil {
 		return err
 	}
@@ -231,8 +231,39 @@ func hostHeader(cfg config) string {
 	return net.JoinHostPort(host, strconv.Itoa(cfg.port))
 }
 
-// readStatus returns the status code from an HTTP/1.x status line. The rest of
-// the response is never read: the connection is closed right after.
+// maxInterim caps how many 1xx responses are skipped, so a server cannot keep
+// the probe reading until its deadline with an endless stream of them.
+const maxInterim = 8
+
+// readFinalStatus skips interim 1xx responses (103 Early Hints, an unasked-for
+// 100 Continue) and returns the final status. 101 is final: nothing follows it
+// on a connection that switched protocols. The body is never read.
+func readFinalStatus(r *bufio.Reader) (int, string, error) {
+	for range maxInterim {
+		code, line, err := readStatus(r)
+		if err != nil || code >= 200 || code == 101 {
+			return code, line, err
+		}
+		if err := skipHeaders(r); err != nil {
+			return 0, line, err
+		}
+	}
+	return 0, "", fmt.Errorf("more than %d interim 1xx responses", maxInterim)
+}
+
+func skipHeaders(r *bufio.Reader) error {
+	for {
+		raw, err := r.ReadSlice('\n')
+		if err != nil {
+			return fmt.Errorf("reading interim response headers: %w", err)
+		}
+		if len(strings.TrimRight(string(raw), "\r\n")) == 0 {
+			return nil
+		}
+	}
+}
+
+// readStatus returns the status code from an HTTP/1.x status line.
 func readStatus(r *bufio.Reader) (int, string, error) {
 	raw, err := r.ReadSlice('\n')
 	if err != nil {

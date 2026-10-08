@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"encoding/pem"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -40,9 +42,14 @@ func runProbe(t *testing.T, args ...string) (int, string) {
 }
 
 func TestStatusCodes(t *testing.T) {
-	var gotPath, gotHost, gotUA string
+	var (
+		mu                      sync.Mutex
+		gotPath, gotHost, gotUA string
+	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		gotPath, gotHost, gotUA = r.URL.RequestURI(), r.Host, r.UserAgent()
+		mu.Unlock()
 		switch r.URL.Path {
 		case "/ok":
 			w.WriteHeader(http.StatusOK)
@@ -87,6 +94,8 @@ func TestStatusCodes(t *testing.T) {
 	}
 
 	_, _ = runProbe(t, probeArgs(t, srv.URL, "-endpoint", "/ok?full=1")...)
+	mu.Lock()
+	defer mu.Unlock()
 	if gotPath != "/ok?full=1" {
 		t.Errorf("request URI = %q, want the query string preserved", gotPath)
 	}
@@ -329,11 +338,93 @@ func TestTLSMinimumVersion(t *testing.T) {
 		t.Skip("built with -tags notls")
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	srv.TLS = &tls.Config{MaxVersion: tls.VersionTLS11}
+	srv.TLS = &tls.Config{MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11}
 	srv.StartTLS()
 	defer srv.Close()
 	code, out := runProbe(t, probeArgs(t, srv.URL, "-tls", "-tls-no-verify", "-timeout", "2s")...)
 	if code != exitUnhealthy {
 		t.Fatalf("exit = %d, want 1 against a TLS 1.1 server; output: %s", code, out)
+	}
+}
+
+// rawServer answers every connection with reply, verbatim.
+func rawServer(t *testing.T, reply string) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = c.Close() }()
+				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+				// Drain the request first: closing with unread input sends RST,
+				// which can discard the reply before the probe reads it.
+				r := bufio.NewReader(c)
+				for {
+					line, err := r.ReadString('\n')
+					if err != nil || line == "\r\n" {
+						break
+					}
+				}
+				_, _ = c.Write([]byte(reply))
+			}()
+		}
+	}()
+	return "http://" + l.Addr().String()
+}
+
+func TestInterimResponses(t *testing.T) {
+	hints := "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
+	cases := []struct {
+		name     string
+		reply    string
+		wantCode int
+	}{
+		{"103 then 200", hints + "HTTP/1.1 200 OK\r\n\r\n", exitHealthy},
+		{"two interim then 204", "HTTP/1.1 100 Continue\r\n\r\n" + hints + "HTTP/1.1 204 No Content\r\n\r\n", exitHealthy},
+		{"103 then 503", hints + "HTTP/1.1 503 Service Unavailable\r\n\r\n", exitUnhealthy},
+		{"101 is final", "HTTP/1.1 101 Switching Protocols\r\n\r\n", exitUnhealthy},
+		{"endless interim", strings.Repeat("HTTP/1.1 100 Continue\r\n\r\n", maxInterim+1) + "HTTP/1.1 200 OK\r\n\r\n", exitUnhealthy},
+		{"interim without final", hints, exitUnhealthy},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out := runProbe(t, probeArgs(t, rawServer(t, tc.reply), "-timeout", "2s")...)
+			if code != tc.wantCode {
+				t.Fatalf("exit = %d, want %d; output: %s", code, tc.wantCode, out)
+			}
+		})
+	}
+}
+
+// SNI selects the certificate on routed listeners, so -tls-no-verify must turn
+// off verification without also dropping the server name.
+func TestTLSNoVerifySendsSNI(t *testing.T) {
+	if !tlsSupported {
+		t.Skip("built with -tags notls")
+	}
+	sni := make(chan string, 1)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.TLS = &tls.Config{GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		sni <- hello.ServerName
+		return nil, nil
+	}}
+	srv.StartTLS()
+	defer srv.Close()
+
+	u, _ := url.Parse(srv.URL)
+	code, out := runProbe(t, "-host", "localhost", "-port", u.Port(), "-tls", "-tls-no-verify", "-timeout", "2s")
+	if code != exitHealthy {
+		t.Fatalf("exit = %d; output: %s", code, out)
+	}
+	if got := <-sni; got != "localhost" {
+		t.Errorf("SNI = %q, want localhost", got)
 	}
 }

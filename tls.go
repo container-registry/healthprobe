@@ -21,10 +21,11 @@ func wrapTLS(conn net.Conn, cfg config) (net.Conn, error) {
 		InsecureSkipVerify: cfg.tlsNoVerify, //nolint:gosec // explicit user opt-in
 		MinVersion:         tls.VersionTLS12,
 	}
-	if tc.ServerName == "" && !cfg.tlsNoVerify {
-		// Go verifies an IP literal against the certificate's IP SANs, so the
-		// host is passed through unchanged, but an IPv6 literal must not be
-		// bracketed.
+	if tc.ServerName == "" {
+		// Set even with -tls-no-verify, because it is also the SNI value an
+		// SNI-routed listener selects its certificate by. Go sends no SNI for an
+		// IP literal and verifies one against the certificate's IP SANs, so the
+		// host is passed through unchanged; an IPv6 literal must not be bracketed.
 		tc.ServerName = cfg.host
 	}
 	if cfg.tlsCACert != "" {
