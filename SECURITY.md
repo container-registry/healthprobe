@@ -66,8 +66,9 @@ Out of scope: vulnerabilities in dependencies with no exploitable path through t
 upstream), findings that require an already-compromised host, and issues that only affect an unsupported
 version.
 
-<!-- Replace this paragraph with anything specific to the project: components that intentionally accept
-     untrusted input, deployment assumptions the threat model depends on, or known accepted risks. -->
+The probe connects only to the address its flags name, `127.0.0.1` by default, and reads no more than the
+first 4 KiB of the response. `-tls-no-verify` disables certificate verification by design, for listeners
+with self-signed certificates; that is an accepted risk, not a vulnerability.
 
 ## What We Publish With Each Release
 
