@@ -37,8 +37,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      # One OIDC identity serves three purposes: the Harbor robot login, keyless
-      # cosign signing and the provenance attestation. No long-lived secret.
       id-token: write
       attestations: write
     outputs:
@@ -119,14 +117,11 @@ jobs:
         run: |
           set -euo pipefail
           image="${OVERRIDE:-$DEFAULT}"
-          # Harbor rejects upper-case repository paths; repository names are not.
           echo "image=$(echo "$image" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
           echo "registry=${image%%/*}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
 
-      # The audience is the registry URL, the convention every federated robot
-      # on 8gears.container-registry.com uses.
       - name: Mint an OIDC token for Harbor
         id: harbor-oidc
         env:
@@ -141,7 +136,6 @@ jobs:
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: ${{ steps.target.outputs.registry }}
-          # Keyless: Harbor ignores the username and validates the JWT.
           username: jwt
           password: ${{ steps.harbor-oidc.outputs.token }}
 

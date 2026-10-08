@@ -59,8 +59,6 @@ jobs:
         if: steps.detect.outputs.go == 'true'
       - if: steps.detect.outputs.go == 'true'
         run: task build
-      # The two properties the project exists for: no third-party code linked,
-      # and a binary that stays small.
       - name: Only the standard library is linked
         if: steps.detect.outputs.go == 'true'
         run: task deps-check
@@ -304,8 +302,7 @@ jobs:
           load: true
           tags: ci-smoke:latest
 
-      # Without a target to probe the default entrypoint exits 1, so the smoke
-      # run asks for the version: the image must start and must not run as root.
+      # Without a target the entrypoint exits 1, so the smoke run asks for -version.
       - name: The image must run, and must not run as root
         if: steps.detect.outputs.docker == 'true'
         run: |
@@ -322,8 +319,6 @@ jobs:
         with:
           go: "false"
 
-      # The probe's contract is the health status the engine records, so it is
-      # tested through real HEALTHCHECKs in shell-less images, not by exit code.
       - name: HEALTHCHECK scenarios under Docker
         if: steps.detect.outputs.docker == 'true'
         run: task e2e:docker

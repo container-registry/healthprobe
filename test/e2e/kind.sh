@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
-# Runs the probe as Kubernetes exec readiness and liveness probes in a
-# throwaway kind cluster. Kubernetes ignores the image HEALTHCHECK, so this
-# covers the other way a shell-less image gets probed.
-#
-#   test/e2e/kind.sh          # needs the Docker images test/e2e/run.sh builds
-#   KEEP=1 test/e2e/kind.sh   # leave the cluster running afterwards
+# Usage: [KEEP=1] test/e2e/kind.sh
 set -euo pipefail
 
 CLUSTER="${CLUSTER:-healthprobe-e2e}"
 CTX="kind-${CLUSTER}"
 IMAGE=localhost/healthprobe-e2e:healthy
-# Pod names and the cleanup selector carry a per-run suffix, so a run against a
-# reused cluster never collides with, or deletes, anything it did not create.
+# Per-run names so a reused cluster never loses pods this run did not create.
 RUN="r$$"
 cd "$(dirname "$0")/../.."
 
-# kind writes its context into KUBECONFIG and makes it current, and deleting
-# the cluster then leaves no current context at all. A private file keeps the
-# caller's kubeconfig untouched.
+# kind create/delete rewrite the current context; keep the caller's kubeconfig out of it.
 KUBECONFIG="$(mktemp "${TMPDIR:-/tmp}/healthprobe-kind.XXXXXX")"
 export KUBECONFIG
 
@@ -89,8 +81,6 @@ for p in ready-http ready-tls ready-notls; do
   fi
 done
 
-# Not-ready is only meaningful once the container runs and the probe has
-# failed a few times, so wait for the failure event rather than a fixed sleep.
 kubectl --context "$CTX" wait --for=jsonpath='{.status.containerStatuses[0].started}'=true "pod/not-ready-${RUN}" --timeout=90s >/dev/null
 event=""
 for _ in $(seq 30); do

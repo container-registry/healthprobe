@@ -1,6 +1,3 @@
-// Command server is the end-to-end test target: plain HTTP on :8080 and HTTPS
-// with a throwaway self-signed certificate on :8443. /healthz answers 200 and
-// /fail answers 503 on both.
 package main
 
 import (

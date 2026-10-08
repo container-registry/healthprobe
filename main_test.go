@@ -18,13 +18,11 @@ import (
 )
 
 func TestVersionDefault(t *testing.T) {
-	// Guards the -ldflags contract: the variable must exist and be settable.
 	if version == "" {
 		t.Error("version must never be empty; it defaults to \"dev\"")
 	}
 }
 
-// probeArgs points the probe at the listener behind rawURL.
 func probeArgs(t *testing.T, rawURL string, extra ...string) []string {
 	t.Helper()
 	u, err := url.Parse(rawURL)
@@ -121,8 +119,6 @@ func TestConnectionRefused(t *testing.T) {
 	}
 }
 
-// A server that accepts and then never answers is the failure a deadline exists
-// for: without one the probe hangs until the runtime kills it.
 func TestHungServerTimesOut(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -336,8 +332,6 @@ func TestHostHeader(t *testing.T) {
 	}
 }
 
-// Keeps the test binary's TLS client honest about what it accepts: the probe
-// must refuse anything below TLS 1.2.
 func TestTLSMinimumVersion(t *testing.T) {
 	if !tlsSupported {
 		t.Skip("built with -tags notls")
@@ -352,7 +346,6 @@ func TestTLSMinimumVersion(t *testing.T) {
 	}
 }
 
-// rawServer answers every connection with reply, verbatim.
 func rawServer(t *testing.T, reply string) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -369,8 +362,7 @@ func rawServer(t *testing.T, reply string) string {
 			go func() {
 				defer func() { _ = c.Close() }()
 				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-				// Drain the request first: closing with unread input sends RST,
-				// which can discard the reply before the probe reads it.
+				// Closing with unread input sends RST, which can drop the reply.
 				r := bufio.NewReader(c)
 				for {
 					line, err := r.ReadString('\n')
@@ -409,8 +401,6 @@ func TestInterimResponses(t *testing.T) {
 	}
 }
 
-// SNI selects the certificate on routed listeners, so -tls-no-verify must turn
-// off verification without also dropping the server name.
 func TestTLSNoVerifySendsSNI(t *testing.T) {
 	if !tlsSupported {
 		t.Skip("built with -tags notls")

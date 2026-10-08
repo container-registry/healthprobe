@@ -113,7 +113,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      # One OIDC identity for the Harbor robot login and keyless signing.
       id-token: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
@@ -133,7 +132,6 @@ jobs:
           IMAGE: ${{ vars.REGISTRY_ADDRESS || '8gears.container-registry.com' }}/${{ vars.PR_REGISTRY_PROJECT || '8gcr-dev' }}/${{ github.event.repository.name }}
         run: |
           set -euo pipefail
-          # Harbor rejects upper-case repository paths; repository names are not.
           echo "image=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
           echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
 
@@ -153,7 +151,6 @@ jobs:
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: ${{ steps.target.outputs.registry }}
-          # Keyless: Harbor ignores the username and validates the JWT.
           username: jwt
           password: ${{ steps.harbor-oidc.outputs.token }}
 
