@@ -59,6 +59,14 @@ jobs:
         if: steps.detect.outputs.go == 'true'
       - if: steps.detect.outputs.go == 'true'
         run: task build
+      # The two properties the project exists for: no third-party code linked,
+      # and a binary that stays small.
+      - name: Only the standard library is linked
+        if: steps.detect.outputs.go == 'true'
+        run: task deps-check
+      - name: Binaries are within their size budget
+        if: steps.detect.outputs.go == 'true'
+        run: task size-check
 
   test:
     name: Test

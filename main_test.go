@@ -154,6 +154,8 @@ func TestMalformedResponses(t *testing.T) {
 	cases := map[string]string{
 		"not HTTP":           "SSH-2.0-OpenSSH_9.6\r\n",
 		"HTTP/2 preface":     "HTTP/2 200\r\n",
+		"garbage minor":      "HTTP/1.garbage 200 OK\r\n",
+		"trailing junk":      "HTTP/1.1junk 200 OK\r\n",
 		"no status code":     "HTTP/1.1 OK\r\n",
 		"four-digit status":  "HTTP/1.1 2000 OK\r\n",
 		"closed immediately": "",
@@ -322,7 +324,10 @@ func TestHostHeader(t *testing.T) {
 		{config{host: "127.0.0.1", port: 443, tls: true}, "localhost"},
 		{config{host: "10.1.2.3", port: 9000}, "10.1.2.3:9000"},
 		{config{host: "fd00::1", port: 9000}, "[fd00::1]:9000"},
-		{config{host: "127.0.0.1", port: 8443, tls: true, tlsServerName: "core.harbor"}, "core.harbor"},
+		{config{host: "127.0.0.1", port: 8443, tls: true, tlsServerName: "core.harbor"}, "core.harbor:8443"},
+		{config{host: "127.0.0.1", port: 443, tls: true, tlsServerName: "core.harbor"}, "core.harbor"},
+		{config{host: "fd00::1", port: 80}, "[fd00::1]"},
+		{config{host: "fd00::1", port: 443, tls: true}, "[fd00::1]"},
 	}
 	for _, tc := range cases {
 		if got := hostHeader(tc.cfg); got != tc.want {

@@ -218,14 +218,16 @@ func probe(cfg config, stderr io.Writer) error {
 // hostHeader is "localhost" for loopback addresses because virtual-host
 // routing (nginx server_name, ingress-style muxes) matches names, not IPs.
 func hostHeader(cfg config) string {
-	if cfg.tls && cfg.tlsServerName != "" {
-		return cfg.tlsServerName
-	}
 	host := cfg.host
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+	if cfg.tls && cfg.tlsServerName != "" {
+		host = cfg.tlsServerName
+	} else if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		host = "localhost"
 	}
 	if cfg.port == 80 && !cfg.tls || cfg.port == 443 && cfg.tls {
+		if strings.Contains(host, ":") {
+			return "[" + host + "]"
+		}
 		return host
 	}
 	return net.JoinHostPort(host, strconv.Itoa(cfg.port))
@@ -277,7 +279,7 @@ func readStatus(r *bufio.Reader) (int, string, error) {
 	}
 	line := strings.TrimRight(string(raw), "\r\n")
 	proto, rest, ok := strings.Cut(line, " ")
-	if !ok || !strings.HasPrefix(proto, "HTTP/1.") {
+	if !ok || len(proto) != len("HTTP/1.1") || !strings.HasPrefix(proto, "HTTP/1.") || proto[7] < '0' || proto[7] > '9' {
 		return 0, line, fmt.Errorf("not an HTTP/1.x response: %q", line)
 	}
 	codeText, _, _ := strings.Cut(rest, " ")
