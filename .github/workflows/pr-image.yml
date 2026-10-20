@@ -47,7 +47,7 @@ jobs:
           STACK_BASE_SHA: ${{ github.event.pull_request.stack.base.sha || '' }}
           STACK_NUMBER: ${{ github.event.pull_request.stack.number || '' }}
           EVENT_ACTION: ${{ github.event.action }}
-          # Only what the Dockerfile consumes; extend when the image copies more.
+          # Only what the Dockerfile consumes: extend when the image copies more.
           IMAGE_INPUTS: |
             ^[^/]+\.go$
             ^cmd/
