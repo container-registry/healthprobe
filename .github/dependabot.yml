@@ -31,7 +31,8 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: docker
-    directory: /
+    # test/e2e builds its server with the same golang image; bump both together.
+    directories: [/, /test/e2e]
     schedule:
       interval: weekly
     cooldown:
@@ -39,3 +40,6 @@ updates:
     labels: [dependencies]
     commit-message:
       prefix: build
+    groups:
+      golang:
+        patterns: [golang]
