@@ -5,7 +5,7 @@ ARG PROBE_IMAGE=localhost/healthprobe:e2e
 # hadolint ignore=DL3006
 FROM ${PROBE_IMAGE} AS probe
 
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS server
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS server
 WORKDIR /src
 COPY go.mod ./
 COPY test/e2e/server ./test/e2e/server
