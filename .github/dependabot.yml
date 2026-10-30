@@ -42,4 +42,5 @@ updates:
       prefix: build
     groups:
       golang:
+        group-by: dependency-name
         patterns: [golang]
