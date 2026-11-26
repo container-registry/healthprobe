@@ -2,7 +2,7 @@ ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot
 ARG BASE_IMAGE_DIGEST=sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
 
 # Cross-compile natively instead of running the Go toolchain under QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine AS builder
 
 WORKDIR /src
 
